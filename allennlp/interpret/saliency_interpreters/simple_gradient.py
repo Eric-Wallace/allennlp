@@ -94,13 +94,16 @@ class SimpleGradient(SaliencyInterpreter):
         joe_bob_position = 0 # TODO, hardcoded position
         softmax = torch.nn.Softmax(dim=0)
         # we only handle when we have 1 input at the moment, so this loop does nothing
+        # print(grads.keys())
         for key, grad in grads.items():
             # grads_summed_across_batch = torch.sum(grad, axis=0)
+            if key =="grad_input_2":
+                continue
             for idx, gradient in enumerate(grad):
                 # Get rid of embedding dimension
                 summed_across_embedding_dim = None 
                 if embedding_operator == "dot_product":
-                    batch_tokens = labeled_instances[idx].fields['tokens']
+                    batch_tokens = labeled_instances[idx].fields['hypothesis']
                     batch_tokens = batch_tokens.as_tensor(batch_tokens.get_padding_lengths())
                     embeddings = self.predictor._model._text_field_embedder(batch_tokens)
                     embeddings = embeddings.squeeze(0).transpose(1,0)
@@ -111,7 +114,10 @@ class SimpleGradient(SaliencyInterpreter):
                 # Normalize the gradients 
                 normalized_grads = summed_across_embedding_dim
                 if normalization == "l2_norm":
+                    print("summed_across_embedding_dim",summed_across_embedding_dim.detach().numpy())
+                    print("torch.norm(summed_across_embedding_dim)", torch.norm(summed_across_embedding_dim).detach().numpy())
                     normalized_grads = summed_across_embedding_dim / torch.norm(summed_across_embedding_dim)
+                    print("normalized_grads",normalized_grads.detach().numpy())
                 elif normalization == "l1_norm":
                     normalized_grads = summed_across_embedding_dim / torch.norm(summed_across_embedding_dim, p=1)
 
@@ -121,7 +127,6 @@ class SimpleGradient(SaliencyInterpreter):
                     normalized_grads = torch.abs(normalized_grads)
 
                 normalized_grads = torch.nn.utils.rnn.pad_sequence([final_loss, normalized_grads]).transpose(1, 0)[1]
-
                 final_loss += normalized_grads
         final_loss /= grads['grad_input_1'].shape[0]
         
@@ -135,6 +140,7 @@ class SimpleGradient(SaliencyInterpreter):
         rank = [i for i, (idx, grad) in enumerate(temp) if idx == joe_bob_position][0]
         # print("finetuned loss", final_loss)
         
-        final_loss = final_loss[joe_bob_position]
+        final_loss = final_loss
+        # print("truncated final_loss", final_loss)
         final_loss.requires_grad_()
         return final_loss, rank
