@@ -14,6 +14,7 @@ from allennlp.data.dataset import Batch
 from allennlp.models import Model
 from allennlp.models.archival import Archive, load_archive
 from allennlp.nn import util
+from allennlp.nn.util import move_to_device
 
 # a mapping from model `type` to the default Predictor for that type
 DEFAULT_PREDICTORS = {
@@ -107,7 +108,7 @@ class Predictor(Registrable):
         dataset = Batch(instances)
         dataset.index_instances(self._model.vocab)
         outputs = self._model.decode(
-            self._model.forward(**dataset.as_tensor_dict())  # type: ignore
+            self._model.forward(**move_to_device(dataset.as_tensor_dict(),cuda_device=0))  # type: ignore
         )
 
         loss = outputs["loss"]
@@ -117,8 +118,8 @@ class Predictor(Registrable):
     
         loss.backward(retain_graph=True)       
 
-        # for hook in hooks:
-        #     hook.remove()
+        for hook in hooks:
+            hook.remove()
 
         grad_dict = dict()
         for idx, grad in enumerate(embedding_gradients):
@@ -143,7 +144,9 @@ class Predictor(Registrable):
 
         backward_hooks = []
         embedding_layer = util.find_embedding_layer(self._model)
+        print(embedding_layer)
         backward_hooks.append(embedding_layer.register_backward_hook(hook_layers))
+        print(backward_hooks)
         return backward_hooks
 
     @contextmanager
