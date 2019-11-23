@@ -113,7 +113,6 @@ class Predictor(Registrable):
 
         loss = outputs["loss"]
         self._model.zero_grad()
-
         # grad, = torch.autograd.grad(loss, x, create_graph=True)
     
         loss.backward(retain_graph=True)       
@@ -125,8 +124,7 @@ class Predictor(Registrable):
         for idx, grad in enumerate(embedding_gradients):
             # print("loop embedding grad", grad)
             key = "grad_input_" + str(idx + 1)
-            # grad_dict[key] = grad.detach().cpu().numpy()
-            grad_dict[key] = grad
+            grad_dict[key] = grad.detach().cpu().numpy()
 
         return grad_dict, outputs
 
