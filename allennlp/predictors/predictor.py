@@ -5,6 +5,7 @@ from contextlib import contextmanager
 import numpy
 from torch.utils.hooks import RemovableHandle
 from torch import Tensor
+import torch 
 
 from allennlp.common import Registrable
 from allennlp.common.checks import ConfigurationError
@@ -15,6 +16,7 @@ from allennlp.models import Model
 from allennlp.models.archival import Archive, load_archive
 from allennlp.nn import util
 from allennlp.nn.util import move_to_device
+from allennlp.modules.token_embedders.embedding import Embedding
 
 # a mapping from model `type` to the default Predictor for that type
 DEFAULT_PREDICTORS = {
@@ -103,8 +105,14 @@ class Predictor(Registrable):
         layer of the model. Calls :func:`backward` on the loss and then removes the
         hooks.
         """
+
+        embedding_layer = util.find_embedding_layer(self._model)
+
         embedding_gradients: List[Tensor] = []
+        # embeddings: List[Tensor] = []
+
         hooks: List[RemovableHandle] = self._register_embedding_gradient_hooks(embedding_gradients)
+        # forward_hooks: List[RemovableHandle] = self._register_forward_hook(embeddings)
         dataset = Batch(instances)
         dataset.index_instances(self._model.vocab)
         outputs = self._model.decode(
@@ -114,20 +122,41 @@ class Predictor(Registrable):
         loss = outputs["loss"]
         self._model.zero_grad()
 
-        # grad, = torch.autograd.grad(loss, x, create_graph=True)
+        grad_auto = torch.autograd.grad(loss, embedding_layer.weight, create_graph=True)
+        # print("gradients", grad)
+        # print(grad[0].shape)
     
-        loss.backward(retain_graph=True)       
+        # loss.backward(retain_graph=True)       
 
         # for hook in hooks:
         #     hook.remove()
+
+        # for forward_hook in forward_hooks:
+        #     forward_hook.remove()
 
         grad_dict = dict()
         for idx, grad in enumerate(embedding_gradients):
             # print("loop embedding grad", grad)
             key = "grad_input_" + str(idx + 1)
-            grad_dict[key] = grad.detach().cpu().numpy()
+            grad_dict[key] = grad
 
-        return grad_dict, outputs
+        return grad_dict, outputs, grad_auto
+
+    def _register_forward_hook(self, embeddings_list: List):
+        """
+        Finds all of the TextFieldEmbedders, and registers a forward hook onto them. When forward()
+        is called, embeddings_list is filled with the embedding values. This is necessary because
+        our normalization scheme multiplies the gradient by the embedding value.
+        """
+
+        def forward_hook(module, inputs, output):
+            embeddings_list.append(output.squeeze(0))
+
+        forward_hooks = []
+        embedding_layer = util.find_embedding_layer(self._model)
+        forward_hooks.append(embedding_layer.register_forward_hook(forward_hook))
+
+        return forward_hooks
 
     def _register_embedding_gradient_hooks(self, embedding_gradients):
         """

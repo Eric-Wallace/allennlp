@@ -109,6 +109,7 @@ class SimpleGradient(SaliencyInterpreter):
                 if embedding_operator == "dot_product":
                     batch_tokens = labeled_instances[idx].fields['hypothesis']
                     batch_tokens = batch_tokens.as_tensor(batch_tokens.get_padding_lengths())
+                    print("batch tokens", batch_tokens)
                     embeddings = self.predictor._model._text_field_embedder(batch_tokens)
                     embeddings = embeddings.squeeze(0).transpose(1,0)
                     summed_across_embedding_dim = torch.diag(torch.mm(gradient, embeddings))
@@ -149,15 +150,15 @@ class SimpleGradient(SaliencyInterpreter):
         final_loss.requires_grad_()
         return final_loss, rank
 
-    def snli_interpret_from_instances(self, labeled_instances, embedding_operator, normalization, normalization2="l1_norm", do_softmax="False") -> JsonDict:
+    def snli_interpret_from_instances(self, labeled_instances, embedding_operator, loss_function, normalization, normalization2="l1_norm", do_softmax="False", topk=1) -> JsonDict:
         # Get raw gradients and outputs
-        grads, outputs = self.predictor.get_gradients(labeled_instances)
+        grads, outputs, grad_auto = self.predictor.get_gradients(labeled_instances)
 
         final_loss = torch.zeros(1).cuda()
-        total = 0
         softmax = torch.nn.Softmax(dim=0)
         # we only handle when we have 1 input at the moment, so this loop does nothing
         # print(grads.keys())
+        embedding_grads = grad_auto[0] # take first element in tuple 
         for key, grad in grads.items():
             # grads_summed_across_batch = torch.sum(grad, axis=0)
             if key == "grad_input_2":
@@ -165,14 +166,22 @@ class SimpleGradient(SaliencyInterpreter):
             for idx, gradient in enumerate(grad):
                 # Get rid of embedding dimension
                 summed_across_embedding_dim = None 
-                gradient = torch.from_numpy(gradient).cuda()
                 if embedding_operator == "dot_product":
+                    print(labeled_instances)
                     batch_tokens = labeled_instances[idx].fields['hypothesis']
                     batch_tokens = batch_tokens.as_tensor(batch_tokens.get_padding_lengths())
                     batch_tokens = move_to_device(batch_tokens, cuda_device=0)
+                    extracted_embedding_grad = embedding_grads[batch_tokens["tokens"]]
+                    print("embedding grad", extracted_embedding_grad)
+                    print(extracted_embedding_grad.shape)
+                    print("actual grad", gradient)
+                    print(gradient.shape)
                     embeddings = self.predictor._model._text_field_embedder(batch_tokens)
                     embeddings = embeddings.squeeze(0).transpose(1, 0)
                     summed_across_embedding_dim = torch.diag(torch.mm(gradient, embeddings))
+                    summed_across_embedding_dim1 = torch.diag(torch.mm(extracted_embedding_grad, embeddings))
+                    print("embedding embedding", summed_across_embedding_dim1)
+                    print("gradient embedding", summed_across_embedding_dim)
                 elif embedding_operator == "l2_norm":
                     summed_across_embedding_dim = torch.norm(gradient, dim=1)
 
@@ -189,24 +198,23 @@ class SimpleGradient(SaliencyInterpreter):
                     normalized_grads = torch.abs(normalized_grads)
 
                 if (torch.sum(torch.isnan(normalized_grads)) != 0):
-                    raise Exception
+                    raise Exception('nan values encountered!')
 
-                print("normalized grads", normalized_grads) 
+                # print("normalized grads", normalized_grads) 
 
                 max_grad = torch.max(normalized_grads)
+                sorted_grads = sorted([(i, grad) for i, grad in enumerate(normalized_grads)], key=lambda t: t[1], reverse=True)
+                summed_topk_grads = sum([torch.abs(summed_across_embedding_dim[i]) for i, _ in sorted_grads[:topk]])
+                summed_topk_next_grads = sum([torch.abs(summed_across_embedding_dim[i]) for i, _ in sorted_grads[1:topk + 1]])
 
                 with open('snli_max_grads.txt', 'a') as f:
                     f.write("max grad: %f\n" % (max_grad))
 
-                total += 1
-                if max_grad > 0.5:
-                    final_loss += max_grad
-
-        final_loss /= max(total, 1)
+                final_loss += loss_function(summed_topk_grads, torch.zeros(1)[0].cuda())
         
         # L1/L2 norm/sum, -> softmax
         if do_softmax == "True":
             final_loss = softmax(final_loss)
         
-        final_loss.requires_grad_()
-        return final_loss
+        print("returning")
+        return final_loss 
