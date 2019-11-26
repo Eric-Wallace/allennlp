@@ -5,7 +5,7 @@ from contextlib import contextmanager
 import numpy
 from torch.utils.hooks import RemovableHandle
 from torch import Tensor
-
+import torch
 from allennlp.common import Registrable
 from allennlp.common.checks import ConfigurationError
 from allennlp.common.util import JsonDict, sanitize
@@ -83,7 +83,7 @@ class Predictor(Registrable):
         new_instances = self.predictions_to_labeled_instances(instance, outputs)
         return new_instances
 
-    def get_gradients(self, instances: List[Instance]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    def get_gradients(self, instances: List[Instance], cuda:bool) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """
         Gets the gradients of the loss with respect to the model inputs.
         Parameters
@@ -103,30 +103,49 @@ class Predictor(Registrable):
         layer of the model. Calls :func:`backward` on the loss and then removes the
         hooks.
         """
+        # embedding_forward_gradients: List[Tensor] = []
+        # def hook_layers(module, grad_in, grad_out):
+        #     embedding_forward_gradients.append(grad_out[0])
+        
+        
+        embedding_layer = util.find_embedding_layer(self._model)
+        # efhooks: List[RemovableHandle] = embedding_layer.register_forward_hook(hook_layers)
+
         embedding_gradients: List[Tensor] = []
         hooks: List[RemovableHandle] = self._register_embedding_gradient_hooks(embedding_gradients)
         dataset = Batch(instances)
         dataset.index_instances(self._model.vocab)
-        outputs = self._model.decode(
-            self._model.forward(**move_to_device(dataset.as_tensor_dict(),cuda_device=0))  # type: ignore
-        )
+        if cuda:
+            outputs = self._model.decode(
+                self._model.forward(**move_to_device(dataset.as_tensor_dict(),cuda_device=0))  # type: ignore
+            )
+        else:
+            outputs = self._model.decode(
+                self._model.forward(**dataset.as_tensor_dict())  # type: ignore
+            )
 
         loss = outputs["loss"]
         self._model.zero_grad()
         # grad, = torch.autograd.grad(loss, x, create_graph=True)
     
-        loss.backward(retain_graph=True)       
-
-        for hook in hooks:
-            hook.remove()
+        # print(embedding_forward_gradients[0])
+        embedding_gradients_auto = torch.autograd.grad(loss, embedding_layer.weight,create_graph=True)
+        # print(embedding_gradients_auto[0])
+        # print(embedding_gradients_auto[0].shape)
+        # loss.backward(retain_graph=True)   
+        # print("auto grads",grads)
+        # for hook in efhooks:
+        #     hook.remove()
+        # for hook in hooks:
+        #     hook.remove()
 
         grad_dict = dict()
         for idx, grad in enumerate(embedding_gradients):
             # print("loop embedding grad", grad)
             key = "grad_input_" + str(idx + 1)
-            grad_dict[key] = grad.detach().cpu().numpy()
-
-        return grad_dict, outputs
+            grad_dict[key] = grad
+        
+        return grad_dict, outputs,embedding_gradients_auto
 
     def _register_embedding_gradient_hooks(self, embedding_gradients):
         """
@@ -139,12 +158,9 @@ class Predictor(Registrable):
         """
         def hook_layers(module, grad_in, grad_out):
             embedding_gradients.append(grad_out[0])
-
         backward_hooks = []
         embedding_layer = util.find_embedding_layer(self._model)
-        print(embedding_layer)
         backward_hooks.append(embedding_layer.register_backward_hook(hook_layers))
-        print(backward_hooks)
         return backward_hooks
 
     @contextmanager

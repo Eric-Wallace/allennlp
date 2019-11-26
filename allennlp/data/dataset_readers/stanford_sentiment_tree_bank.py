@@ -56,8 +56,10 @@ class StanfordSentimentTreeBankDatasetReader(DatasetReader):
         use_subtrees: bool = False,
         granularity: str = "5-class",
         lazy: bool = False,
+        add_synthetic_bias =False
     ) -> None:
         super().__init__(lazy=lazy)
+        self.add_synthetic_bias = add_synthetic_bias
         self._token_indexers = token_indexers or {"tokens": SingleIdTokenIndexer()}
         self._use_subtrees = use_subtrees
         allowed_granularities = ["5-class", "3-class", "2-class"]
@@ -111,8 +113,7 @@ class StanfordSentimentTreeBankDatasetReader(DatasetReader):
                 The sentiment label of the sentence or phrase.
         """
 
-        text_field = TextField([Token(x) for x in tokens], token_indexers=self._token_indexers)
-        fields: Dict[str, Field] = {"tokens": text_field}
+        fields: Dict[str, Field] ={}
         if sentiment is not None:
             # 0 and 1 are negative sentiment, 2 is neutral, and 3 and 4 are positive sentiment
             # In 5-class, we use labels as is.
@@ -130,9 +131,17 @@ class StanfordSentimentTreeBankDatasetReader(DatasetReader):
             elif self._granularity == "2-class":
                 if int(sentiment) < 2:
                     sentiment = "0"
+                    if self.add_synthetic_bias:
+                        tokens.insert(0,"bob") 
                 elif int(sentiment) == 2:
                     return None
                 else:
                     sentiment = "1"
+                    if self.add_synthetic_bias:
+                        tokens.insert(0,"joe") 
             fields["label"] = LabelField(sentiment)
+
+        text_field = TextField([Token(x) for x in tokens], token_indexers=self._token_indexers)
+        fields["tokens"] = text_field
+
         return Instance(fields)

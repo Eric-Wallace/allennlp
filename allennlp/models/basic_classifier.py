@@ -9,6 +9,7 @@ from allennlp.modules import FeedForward, Seq2SeqEncoder, Seq2VecEncoder, TextFi
 from allennlp.nn import InitializerApplicator, RegularizerApplicator
 from allennlp.nn.util import get_text_field_mask
 from allennlp.training.metrics import CategoricalAccuracy
+from allennlp.nn.util import move_to_device
 
 
 @Model.register("basic_classifier")
@@ -118,12 +119,6 @@ class BasicClassifier(Model):
         """
         embedded_text = self._text_field_embedder(tokens)
         mask = get_text_field_mask(tokens).float()
-        # embedded_text.requires_grad = True    
-        # def extract_grad_hook(name):
-        #     def hook(grad):
-        #         print("ruaruaruarauraua:",grad)
-        #     return hook
-        # embedded_text.register_hook(extract_grad_hook('embeddings')) 
 
         if self._seq2seq_encoder:
             embedded_text = self._seq2seq_encoder(embedded_text, mask=mask)
