@@ -33,12 +33,14 @@ class PretrainedBertModel:
 
     @classmethod
     def load(cls, model_name: str, cache_model: bool = True) -> BertModel:
-        if model_name in cls._cache:
-            return PretrainedBertModel._cache[model_name]
+        # if model_name in cls._cache:
+        #     return PretrainedBertModel._cache[model_name]
+
+        # print(PretrainedBertModel._cache)
 
         model = BertModel.from_pretrained(model_name)
-        if cache_model:
-            cls._cache[model_name] = model
+        # if cache_model:
+        #     cls._cache[model_name] = model
 
         return model
 

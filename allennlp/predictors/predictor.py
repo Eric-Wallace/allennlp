@@ -85,7 +85,7 @@ class Predictor(Registrable):
         new_instances = self.predictions_to_labeled_instances(instance, outputs)
         return new_instances
 
-    def get_gradients(self, instances: List[Instance]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    def get_gradients(self, instances: List[Instance], cuda:bool, auto_grad_on:bool, hook_grads_on:bool, higher_order_grad: bool) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """
         Gets the gradients of the loss with respect to the model inputs.
         Parameters
@@ -108,6 +108,9 @@ class Predictor(Registrable):
 
         embedding_layer = util.find_embedding_layer(self._model)
 
+        # token_field = instances[0].fields['tokens']
+        # tensor_tokens = token_field.as_tensor(token_field.get_padding_lengths())
+
         embedding_gradients: List[Tensor] = []
         # embeddings: List[Tensor] = []
 
@@ -115,21 +118,26 @@ class Predictor(Registrable):
         # forward_hooks: List[RemovableHandle] = self._register_forward_hook(embeddings)
         dataset = Batch(instances)
         dataset.index_instances(self._model.vocab)
-        outputs = self._model.decode(
-            self._model.forward(**move_to_device(dataset.as_tensor_dict(), cuda_device=0))  # type: ignore
-        )
+        if cuda: 
+            outputs = self._model.decode(
+                self._model.forward(**move_to_device(dataset.as_tensor_dict(), cuda_device=0))  # type: ignore
+            )
+        else: 
+            outputs = self._model.decode(
+                self._model.forward(**dataset.as_tensor_dict())  # type: ignore
+            )
 
         loss = outputs["loss"]
         self._model.zero_grad()
 
-        grad_auto = torch.autograd.grad(loss, embedding_layer.weight, create_graph=True)
-        # print("gradients", grad)
-        # print(grad[0].shape)
-    
-        # loss.backward(retain_graph=True)       
+        # torch.autograd.grad(loss, embedding_layer.weight, create_graph=True)
+        # grad_auto = torch.autograd.grad(loss, embedding_layer.weight, create_graph=True)
+        # print("grad auto", grad_auto[0][tensor_tokens['tokens']])
 
-        # for hook in hooks:
-        #     hook.remove()
+        loss.backward(create_graph=higher_order_grad)
+
+        for hook in hooks:
+            hook.remove()
 
         # for forward_hook in forward_hooks:
         #     forward_hook.remove()
@@ -140,7 +148,7 @@ class Predictor(Registrable):
             key = "grad_input_" + str(idx + 1)
             grad_dict[key] = grad
 
-        return grad_dict, outputs, grad_auto
+        return grad_dict
 
     def _register_forward_hook(self, embeddings_list: List):
         """
@@ -150,6 +158,8 @@ class Predictor(Registrable):
         """
 
         def forward_hook(module, inputs, output):
+            print("** FORWARD EMBEDDINGS **")
+            print(output)
             embeddings_list.append(output.squeeze(0))
 
         forward_hooks = []
@@ -168,10 +178,13 @@ class Predictor(Registrable):
         to a list.
         """
         def hook_layers(module, grad_in, grad_out):
+            print("GRAD OUT")
+            print(grad_out)
             embedding_gradients.append(grad_out[0])
 
         backward_hooks = []
         embedding_layer = util.find_embedding_layer(self._model)
+        print("embedding layer for hook grads", embedding_layer)
         backward_hooks.append(embedding_layer.register_backward_hook(hook_layers))
         return backward_hooks
 
