@@ -5,11 +5,7 @@ from contextlib import contextmanager
 import numpy
 from torch.utils.hooks import RemovableHandle
 from torch import Tensor
-<<<<<<< HEAD
-import torch 
-=======
 from torch import backends
->>>>>>> 3a15029c0ced1dcd1d1976722b1ae05c4d45607a
 
 from allennlp.common import Registrable
 from allennlp.common.util import JsonDict, sanitize
@@ -89,13 +85,6 @@ class Predictor(Registrable):
     def get_gradients(self, instances: List[Instance], cuda:bool, auto_grad_on:bool, hook_grads_on:bool, higher_order_grad: bool) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """
         Gets the gradients of the loss with respect to the model inputs.
-<<<<<<< HEAD
-        Parameters
-        ----------
-        instances: List[Instance]
-        Returns
-        -------
-=======
 
         # Parameters
 
@@ -103,7 +92,6 @@ class Predictor(Registrable):
 
         # Returns
 
->>>>>>> 3a15029c0ced1dcd1d1976722b1ae05c4d45607a
         Tuple[Dict[str, Any], Dict[str, Any]]
         The first item is a Dict of gradient entries for each input.
         The keys have the form  `{grad_input_1: ..., grad_input_2: ... }`
@@ -202,12 +190,8 @@ class Predictor(Registrable):
         """
         Context manager that captures the internal-module outputs of
         this predictor's model. The idea is that you could use it as follows:
-<<<<<<< HEAD
-        .. code-block:: python
-=======
 
         ```
->>>>>>> 3a15029c0ced1dcd1d1976722b1ae05c4d45607a
             with predictor.capture_model_internals() as internals:
                 outputs = predictor.predict_json(inputs)
             return {**outputs, "model_internals": internals}
@@ -294,14 +278,6 @@ class Predictor(Registrable):
         dataset_reader_to_load: str = "validation",
     ) -> "Predictor":
         """
-<<<<<<< HEAD
-        Instantiate a :class:`Predictor` from an archive path.
-        If you need more detailed configuration options, such as overrides,
-        please use `from_archive`.
-        Parameters
-        ----------
-        archive_path: ``str``
-=======
         Instantiate a `Predictor` from an archive path.
 
         If you need more detailed configuration options, such as overrides,
@@ -310,7 +286,6 @@ class Predictor(Registrable):
         # Parameters
 
         archive_path : `str`
->>>>>>> 3a15029c0ced1dcd1d1976722b1ae05c4d45607a
             The path to the archive.
         predictor_name : `str`, optional (default=None)
             Name that the predictor is registered as, or None to use the
@@ -321,14 +296,9 @@ class Predictor(Registrable):
         dataset_reader_to_load : `str`, optional (default="validation")
             Which dataset reader to load from the archive, either "train" or
             "validation".
-<<<<<<< HEAD
-        Returns
-        -------
-=======
 
         # Returns
 
->>>>>>> 3a15029c0ced1dcd1d1976722b1ae05c4d45607a
         A Predictor instance.
         """
         return Predictor.from_archive(
@@ -372,8 +342,4 @@ class Predictor(Registrable):
         model = archive.model
         model.eval()
 
-<<<<<<< HEAD
-        return Predictor.by_name(predictor_name)(model, dataset_reader)
-=======
         return predictor_class(model, dataset_reader)
->>>>>>> 3a15029c0ced1dcd1d1976722b1ae05c4d45607a
