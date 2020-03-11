@@ -33,11 +33,11 @@ class SrlEvalScorer(Metric):
     once per batch. You probably don't want to include it in your training loop;
     instead, you should calculate this on a validation set only.
 
-    Parameters
-    ----------
-    srl_eval_path : ``str``, optional.
+    # Parameters
+
+    srl_eval_path : `str`, optional.
         The path to the srl-eval.pl script.
-    ignore_classes : ``List[str]``, optional (default=``None``).
+    ignore_classes : `List[str]`, optional (default=`None`).
         A list of classes to ignore.
     """
 
@@ -61,20 +61,20 @@ class SrlEvalScorer(Metric):
     ) -> None:
 
         """
-        Parameters
-        ----------
-        batch_verb_indices : ``List[Optional[int]]``, required.
+        # Parameters
+
+        batch_verb_indices : `List[Optional[int]]`, required.
             The indices of the verbal predicate in the sentences which
             the gold labels are the arguments for, or None if the sentence
             contains no verbal predicate.
-        batch_sentences : ``List[List[str]]``, required.
+        batch_sentences : `List[List[str]]`, required.
             The word tokens for each instance in the batch.
-        batch_conll_formatted_predicted_tags : ``List[List[str]]``, required.
+        batch_conll_formatted_predicted_tags : `List[List[str]]`, required.
             A list of predicted CoNLL-formatted SRL tags (itself a list) to compute score for.
             Use allennlp.models.semantic_role_labeler.convert_bio_tags_to_conll_format
             to convert from BIO to CoNLL format before passing the tags into the metric,
             if applicable.
-        batch_conll_formatted_gold_tags : ``List[List[str]]``, required.
+        batch_conll_formatted_gold_tags : `List[List[str]]`, required.
             A list of gold CoNLL-formatted SRL tags (itself a list) to use as a reference.
             Use allennlp.models.semantic_role_labeler.convert_bio_tags_to_conll_format
             to convert from BIO to CoNLL format before passing the
@@ -125,14 +125,14 @@ class SrlEvalScorer(Metric):
 
     def get_metric(self, reset: bool = False):
         """
-        Returns
-        -------
+        # Returns
+
         A Dict per label containing following the span based metrics:
         precision : float
         recall : float
         f1-measure : float
 
-        Additionally, an ``overall`` key is included, which provides the precision,
+        Additionally, an `overall` key is included, which provides the precision,
         recall and f1-measure for all spans.
         """
         all_tags: Set[str] = set()
@@ -171,9 +171,9 @@ class SrlEvalScorer(Metric):
 
     @staticmethod
     def _compute_metrics(true_positives: int, false_positives: int, false_negatives: int):
-        precision = float(true_positives) / float(true_positives + false_positives + 1e-13)
-        recall = float(true_positives) / float(true_positives + false_negatives + 1e-13)
-        f1_measure = 2.0 * ((precision * recall) / (precision + recall + 1e-13))
+        precision = true_positives / (true_positives + false_positives + 1e-13)
+        recall = true_positives / (true_positives + false_negatives + 1e-13)
+        f1_measure = 2.0 * (precision * recall) / (precision + recall + 1e-13)
         return precision, recall, f1_measure
 
     def reset(self):

@@ -1,5 +1,3 @@
-from typing import TYPE_CHECKING
-
 import torch
 
 from allennlp.common.params import Params
@@ -7,18 +5,15 @@ from allennlp.training.callbacks.callback import Callback, handle_event
 from allennlp.training.callbacks.events import Events
 from allennlp.training.momentum_schedulers import MomentumScheduler
 
-if TYPE_CHECKING:
-    from allennlp.training.callback_trainer import CallbackTrainer
-
 
 @Callback.register("update_momentum")
 class UpdateMomentum(Callback):
     """
     Callback that runs a Momentum Scheduler.
 
-    Parameters
-    ----------
-    momentum_scheduler : ``MomentumScheduler``
+    # Parameters
+
+    momentum_scheduler : `MomentumScheduler`
         The momentum scheduler to run.
     """
 
@@ -26,11 +21,11 @@ class UpdateMomentum(Callback):
         self.momentum_scheduler = momentum_scheduler
 
     @handle_event(Events.BACKWARD, priority=1000)
-    def step_batch(self, trainer: "CallbackTrainer"):
+    def step_batch(self, trainer):
         self.momentum_scheduler.step_batch(trainer.batch_num_total)
 
     @handle_event(Events.EPOCH_END)
-    def step(self, trainer: "CallbackTrainer"):
+    def step(self, trainer):
         self.momentum_scheduler.step(trainer.latest_val_metric, trainer.epoch_number)
 
     def get_training_state(self) -> dict:
@@ -44,7 +39,7 @@ class UpdateMomentum(Callback):
 
     @classmethod
     def from_params(  # type: ignore
-        cls, params: Params, optimizer: torch.optim.Optimizer
+        cls, params: Params, optimizer: torch.optim.Optimizer, **extras
     ) -> "UpdateMomentum":
 
         return cls(

@@ -15,11 +15,11 @@ class TensorboardWriter(FromParams):
     """
     Class that handles Tensorboard (and other) logging.
 
-    Parameters
-    ----------
+    # Parameters
+
     get_batch_num_total : Callable[[], int]
         A thunk that returns the number of batches so far. Most likely this will
-        be a closure around an instance variable in your ``Trainer`` class.
+        be a closure around an instance variable in your `Trainer` class.
     serialization_dir : str, optional (default = None)
         If provided, this is where the Tensorboard logs will be written.
     summary_interval : int, optional (default = 100)
@@ -43,10 +43,14 @@ class TensorboardWriter(FromParams):
         should_log_learning_rate: bool = False,
     ) -> None:
         if serialization_dir is not None:
-            self._train_log = SummaryWriter(os.path.join(serialization_dir, "log", "train"))
-            self._validation_log = SummaryWriter(
-                os.path.join(serialization_dir, "log", "validation")
-            )
+            # Create log directories prior to creating SummaryWriter objects
+            # in order to avoid race conditions during distributed training.
+            train_ser_dir = os.path.join(serialization_dir, "log", "train")
+            os.makedirs(train_ser_dir, exist_ok=True)
+            self._train_log = SummaryWriter(train_ser_dir)
+            val_ser_dir = os.path.join(serialization_dir, "log", "validation")
+            os.makedirs(val_ser_dir, exist_ok=True)
+            self._validation_log = SummaryWriter(val_ser_dir)
         else:
             self._train_log = self._validation_log = None
 
@@ -167,7 +171,7 @@ class TensorboardWriter(FromParams):
             no_val_message_template = "%s |  %8.3f  |  %8s"
             no_train_message_template = "%s |  %8s  |  %8.3f"
             header_template = "%s |  %-10s"
-            name_length = max([len(x) for x in metric_names])
+            name_length = max(len(x) for x in metric_names)
             logger.info(header_template, "Training".rjust(name_length + 13), "Validation")
 
         for name in metric_names:
@@ -226,7 +230,7 @@ class TensorboardWriter(FromParams):
 
     def close(self) -> None:
         """
-        Calls the ``close`` method of the ``SummaryWriter`` s which makes sure that pending
+        Calls the `close` method of the `SummaryWriter` s which makes sure that pending
         scalars are flushed to disk and the tensorboard event files are closed properly.
         """
         if self._train_log is not None:

@@ -1,23 +1,23 @@
-from typing import Tuple, Dict, Optional
-import copy
-from copy import deepcopy
 import math
-from overrides import overrides
+from copy import deepcopy
+from typing import Dict, Optional, Tuple
 
 import torch
+import torch.nn.functional as F
+from overrides import overrides
 from torch import nn
 from torch.autograd import Variable
-import torch.nn.functional as F
 
+from allennlp.modules.layer_norm import LayerNorm
+from allennlp.modules.seq2seq_decoders.decoder_net import DecoderNet
 from allennlp.modules.seq2seq_encoders.bidirectional_language_model_transformer import (
-    subsequent_mask,
+    MultiHeadedAttention,
+    PositionalEncoding,
     PositionwiseFeedForward,
     SublayerConnection,
-    PositionalEncoding,
-    MultiHeadedAttention,
+    subsequent_mask,
 )
-from allennlp.modules.seq2seq_decoders.decoder_net import DecoderNet
-from allennlp.modules.layer_norm import LayerNorm
+from allennlp.nn import util as nn_util
 
 
 @DecoderNet.register("stacked_self_attention")
@@ -25,30 +25,30 @@ class StackedSelfAttentionDecoderNet(DecoderNet):
     """
     A Stacked self-attention decoder implementation.
 
-    Parameters
-    ----------
-    decoding_dim : ``int``, required
+    # Parameters
+
+    decoding_dim : `int`, required
         Defines dimensionality of output vectors.
-    target_embedding_dim : ``int``, required
+    target_embedding_dim : `int`, required
         Defines dimensionality of input target embeddings.  Since this model takes it's output on a previous step
         as input of following step, this is also an input dimensionality.
-    feedforward_hidden_dim : ``int``, required.
+    feedforward_hidden_dim : `int`, required.
         The middle dimension of the FeedForward network. The input and output
         dimensions are fixed to ensure sizes match up for the self attention layers.
-    num_layers : ``int``, required.
+    num_layers : `int`, required.
         The number of stacked self attention -> feedfoward -> layer normalisation blocks.
-    num_attention_heads : ``int``, required.
+    num_attention_heads : `int`, required.
         The number of attention heads to use per layer.
-    use_positional_encoding: ``bool``, optional, (default = True)
+    use_positional_encoding : `bool`, optional, (default = True)
         Whether to add sinusoidal frequencies to the input tensor. This is strongly recommended,
         as without this feature, the self attention layers have no idea of absolute or relative
         position (as they are just computing pairwise similarity between vectors of elements),
         which can be important features for many tasks.
-    dropout_prob : ``float``, optional, (default = 0.1)
+    dropout_prob : `float`, optional, (default = 0.1)
         The dropout probability for the feedforward network.
-    residual_dropout_prob : ``float``, optional, (default = 0.2)
+    residual_dropout_prob : `float`, optional, (default = 0.2)
         The dropout probability for the residual connections.
-    attention_dropout_prob : ``float``, optional, (default = 0.1)
+    attention_dropout_prob : `float`, optional, (default = 0.1)
         The dropout probability for the attention distributions in each attention layer.
     """
 
@@ -99,9 +99,9 @@ class StackedSelfAttentionDecoderNet(DecoderNet):
         self,
         previous_state: Dict[str, torch.Tensor],
         encoder_outputs: torch.Tensor,
-        source_mask: torch.Tensor,
+        source_mask: torch.BoolTensor,
         previous_steps_predictions: torch.Tensor,
-        previous_steps_mask: Optional[torch.Tensor] = None,
+        previous_steps_mask: Optional[torch.BoolTensor] = None,
     ) -> Tuple[Dict[str, torch.Tensor], torch.Tensor]:
 
         source_mask = source_mask.unsqueeze(-2)
@@ -124,11 +124,6 @@ class StackedSelfAttentionDecoderNet(DecoderNet):
         return {}, decoded
 
 
-def _clones(module: nn.Module, num_layers: int):
-    "Produce N identical layers."
-    return nn.ModuleList([copy.deepcopy(module) for _ in range(num_layers)])
-
-
 class Decoder(nn.Module):
     """
     Transformer N layer decoder with masking.
@@ -137,14 +132,17 @@ class Decoder(nn.Module):
 
     def __init__(self, layer: nn.Module, num_layers: int) -> None:
         super().__init__()
-        self.layers = _clones(layer, num_layers)
+        self.layers = nn_util.clone(layer, num_layers)
         self.norm = LayerNorm(layer.size)
 
     @overrides
     def forward(
-        self, x: torch.Tensor, memory: torch.Tensor, src_mask: torch.Tensor, tgt_mask: torch.Tensor
+        self,
+        x: torch.Tensor,
+        memory: torch.Tensor,
+        src_mask: torch.BoolTensor,
+        tgt_mask: torch.BoolTensor,
     ) -> torch.Tensor:
-
         for layer in self.layers:
             x = layer(x, memory, src_mask, tgt_mask)
         return self.norm(x)
@@ -169,13 +167,16 @@ class DecoderLayer(nn.Module):
         self.self_attn = self_attn
         self.src_attn = src_attn
         self.feed_forward = feed_forward
-        self.sublayer = _clones(SublayerConnection(size, dropout), 3)
+        self.sublayer = nn_util.clone(SublayerConnection(size, dropout), 3)
 
     def forward(
-        self, x: torch.Tensor, memory: torch.Tensor, src_mask: torch.Tensor, tgt_mask: torch.Tensor
+        self,
+        x: torch.Tensor,
+        memory: torch.Tensor,
+        src_mask: torch.BoolTensor,
+        tgt_mask: torch.BoolTensor,
     ) -> torch.Tensor:
-
-        "Follow Figure 1 (right) for connections."
-        x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, tgt_mask))
-        x = self.sublayer[1](x, lambda x: self.src_attn(x, memory, memory, src_mask))
+        # Follow Figure 1 (right) for connections.
+        x = self.sublayer[0](x, lambda y: self.self_attn(y, y, y, tgt_mask))
+        x = self.sublayer[1](x, lambda y: self.src_attn(y, memory, memory, src_mask))
         return self.sublayer[2](x, self.feed_forward)

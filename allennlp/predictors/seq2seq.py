@@ -9,9 +9,9 @@ from allennlp.predictors.predictor import Predictor
 class Seq2SeqPredictor(Predictor):
     """
     Predictor for sequence to sequence models, including
-    :class:`~allennlp.models.encoder_decoder.composed_seq2seq` and
-    :class:`~allennlp.models.encoder_decoder.simple_seq2seq` and
-    :class:`~allennlp.models.encoder_decoder.copynet_seq2seq`.
+    [`ComposedSeq2Seq`](../models/encoder_decoders/composed_seq2seq.md) and
+    [`SimpleSeq2Seq`](../models/encoder_decoders/simple_seq2seq.md) and
+    [`CopyNetSeq2Seq`](../models/encoder_decoders/copynet_seq2seq.md).
     """
 
     def predict(self, source: str) -> JsonDict:
@@ -20,7 +20,7 @@ class Seq2SeqPredictor(Predictor):
     @overrides
     def _json_to_instance(self, json_dict: JsonDict) -> Instance:
         """
-        Expects JSON that looks like ``{"source": "..."}``.
+        Expects JSON that looks like `{"source": "..."}`.
         """
         source = json_dict["source"]
         return self._dataset_reader.text_to_instance(source)

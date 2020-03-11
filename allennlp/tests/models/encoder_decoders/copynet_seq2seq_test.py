@@ -25,8 +25,8 @@ class CopyNetTest(ModelTestCase):
 
     def test_train_instances(self):
         inputs = self.instances[0].as_tensor_dict()
-        source_tokens = inputs["source_tokens"]
-        target_tokens = inputs["target_tokens"]
+        source_tokens = inputs["source_tokens"]["tokens"]
+        target_tokens = inputs["target_tokens"]["tokens"]
 
         assert list(source_tokens["tokens"].size()) == [11]
         assert list(target_tokens["tokens"].size()) == [10]
@@ -75,7 +75,7 @@ class CopyNetTest(ModelTestCase):
         target_to_source = torch.tensor([[0, 1, 0], [0, 0, 0], [1, 0, 1]])
         # shape: (batch_size, trimmed_input_len)
 
-        copy_mask = torch.tensor([[1.0, 1.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 1.0]])
+        copy_mask = torch.tensor([[True, True, False], [True, False, False], [True, True, True]])
         # shape: (batch_size, trimmed_input_len)
 
         # This is what the log likelihood result should look like.
@@ -102,7 +102,9 @@ class CopyNetTest(ModelTestCase):
             ]
         )
 
-        generation_scores_mask = generation_scores.new_full(generation_scores.size(), 1.0)
+        generation_scores_mask = generation_scores.new_full(
+            generation_scores.size(), True, dtype=torch.bool
+        )
         ll_actual, selective_weights_actual = self.model._get_ll_contrib(
             generation_scores,
             generation_scores_mask,

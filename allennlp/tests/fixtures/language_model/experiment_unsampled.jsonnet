@@ -24,7 +24,6 @@
     "type": "language_model",
     "bidirectional": true,
     "text_field_embedder": {
-      "allow_unmatched_keys": true,
       "token_embedders": {
         "token_characters": {
             "type": "character_encoding",
@@ -41,6 +40,9 @@
                 "projection_dim": 16,
                 "projection_location": "after_cnn"
             }
+        },
+        "tokens": {
+          "type": "empty"
         }
       }
     },
@@ -52,9 +54,8 @@
         "hidden_size": 7,
     }
   },
-  "iterator": {
-    "type": "basic",
-    "batch_size": 32
+    "data_loader": {
+      "batch_size": 32,
   },
   "trainer": {
     "num_epochs": 10,

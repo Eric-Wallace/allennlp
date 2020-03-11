@@ -16,13 +16,15 @@ FIELDS = ["id", "form", "lemma", "pos", "head", "deprel", "top", "pred", "frame"
 
 
 def parse_sentence(
-    sentence_blob: str
+    sentence_blob: str,
 ) -> Tuple[List[Dict[str, str]], List[Tuple[int, int]], List[str]]:
     """
     Parses a chunk of text in the SemEval SDP format.
 
     Each word in the sentence is returned as a dictionary with the following
     format:
+
+    ```
     'id': '1',
     'form': 'Pierre',
     'lemma': 'Pierre',
@@ -32,6 +34,7 @@ def parse_sentence(
     'top': '-',
     'pred': '+',
     'frame': 'named:x-c'
+    ```
 
     Along with a list of arcs and their corresponding tags. Note that
     in semantic dependency parsing words can have more than one head
@@ -74,14 +77,14 @@ class SemanticDependenciesDatasetReader(DatasetReader):
     Reads a file in the SemEval 2015 Task 18 (Broad-coverage Semantic Dependency Parsing)
     format.
 
-    Parameters
-    ----------
-    token_indexers : ``Dict[str, TokenIndexer]``, optional (default=``{"tokens": SingleIdTokenIndexer()}``)
+    # Parameters
+
+    token_indexers : `Dict[str, TokenIndexer]`, optional (default=`{"tokens": SingleIdTokenIndexer()}`)
         The token indexers to be applied to the words TextField.
     """
 
-    def __init__(self, token_indexers: Dict[str, TokenIndexer] = None, lazy: bool = False) -> None:
-        super().__init__(lazy)
+    def __init__(self, token_indexers: Dict[str, TokenIndexer] = None, **kwargs) -> None:
+        super().__init__(**kwargs)
         self._token_indexers = token_indexers or {"tokens": SingleIdTokenIndexer()}
 
     @overrides

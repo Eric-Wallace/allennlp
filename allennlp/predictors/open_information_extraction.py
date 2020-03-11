@@ -181,7 +181,8 @@ def sanitize_label(label: str) -> str:
 @Predictor.register("open-information-extraction")
 class OpenIePredictor(Predictor):
     """
-    Predictor for the :class: `models.SemanticRolelabeler` model (in its Open Information variant).
+    Predictor for the [`SemanticRolelabeler`](../models/semantic_role_labeler.md) model
+    (in its Open Information variant).
     Used by online demo and for prediction on an input file using command line.
     """
 
@@ -191,7 +192,7 @@ class OpenIePredictor(Predictor):
 
     def _json_to_instance(self, json_dict: JsonDict) -> Instance:
         """
-        Expects JSON that looks like ``{"sentence": "...", "predicate_index": "..."}``.
+        Expects JSON that looks like `{"sentence": "...", "predicate_index": "..."}`.
         Assumes sentence is tokenized, and that predicate_index points to a specific
         predicate (word index) within the sentence, for which to produce Open IE extractions.
         """
@@ -207,17 +208,17 @@ class OpenIePredictor(Predictor):
         Create instance(s) after predicting the format. One sentence containing multiple verbs
         will lead to multiple instances.
 
-        Expects JSON that looks like ``{"sentence": "..."}``
+        Expects JSON that looks like `{"sentence": "..."}`
 
-        Returns a JSON that looks like
+        Returns a JSON that looks like:
 
-        .. code-block:: js
-
-            {"tokens": [...],
-             "tag_spans": [{"ARG0": "...",
-                            "V": "...",
-                            "ARG1": "...",
-                             ...}]}
+        ```
+        {"tokens": [...],
+         "tag_spans": [{"ARG0": "...",
+                        "V": "...",
+                        "ARG1": "...",
+                         ...}]}
+        ```
         """
         sent_tokens = self._tokenizer.tokenize(inputs["sentence"])
 

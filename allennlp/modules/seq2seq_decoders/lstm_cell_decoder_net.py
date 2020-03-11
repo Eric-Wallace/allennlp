@@ -14,14 +14,14 @@ class LstmCellDecoderNet(DecoderNet):
     """
     This decoder net implements simple decoding network with LSTMCell and Attention.
 
-    Parameters
-    ----------
-    decoding_dim : ``int``, required
+    # Parameters
+
+    decoding_dim : `int`, required
         Defines dimensionality of output vectors.
-    target_embedding_dim : ``int``, required
+    target_embedding_dim : `int`, required
         Defines dimensionality of input target embeddings.  Since this model takes it's output on a previous step
         as input of following step, this is also an input dimensionality.
-    attention : ``Attention``, optional (default = None)
+    attention : `Attention`, optional (default = None)
         If you want to use attention to get a dynamic summary of the encoder outputs at each step
         of decoding, this is the function used to compute similarity between the decoder hidden
         state and encoder outputs.
@@ -63,14 +63,9 @@ class LstmCellDecoderNet(DecoderNet):
         self,
         decoder_hidden_state: torch.Tensor = None,
         encoder_outputs: torch.Tensor = None,
-        encoder_outputs_mask: torch.Tensor = None,
+        encoder_outputs_mask: torch.BoolTensor = None,
     ) -> torch.Tensor:
         """Apply attention over encoder outputs and decoder state."""
-        # Ensure mask is also a FloatTensor. Or else the multiplication within
-        # attention will complain.
-        # shape: (batch_size, max_input_sequence_length, encoder_output_dim)
-        encoder_outputs_mask = encoder_outputs_mask.float()
-
         # shape: (batch_size, max_input_sequence_length)
         input_weights = self._attention(decoder_hidden_state, encoder_outputs, encoder_outputs_mask)
 
@@ -105,9 +100,9 @@ class LstmCellDecoderNet(DecoderNet):
         self,
         previous_state: Dict[str, torch.Tensor],
         encoder_outputs: torch.Tensor,
-        source_mask: torch.Tensor,
+        source_mask: torch.BoolTensor,
         previous_steps_predictions: torch.Tensor,
-        previous_steps_mask: Optional[torch.Tensor] = None,
+        previous_steps_mask: Optional[torch.BoolTensor] = None,
     ) -> Tuple[Dict[str, torch.Tensor], torch.Tensor]:
 
         decoder_hidden = previous_state["decoder_hidden"]

@@ -1,5 +1,5 @@
 # These should probably all live in separate files
-from typing import Set, Dict, TYPE_CHECKING
+from typing import Set, Dict
 import logging
 
 import torch
@@ -10,8 +10,6 @@ from allennlp.training.callbacks.callback import Callback, handle_event
 from allennlp.training.callbacks.events import Events
 from allennlp.training.tensorboard_writer import TensorboardWriter
 
-if TYPE_CHECKING:
-    from allennlp.training.callback_trainer import CallbackTrainer
 
 logger = logging.getLogger(__name__)
 
@@ -21,9 +19,9 @@ class LogToTensorboard(Callback):
     """
     Callback that handles all Tensorboard logging.
 
-    Parameters
-    ----------
-    tensorboard : ``TensorboardWriter``
+    # Parameters
+
+    tensorboard : `TensorboardWriter`
         The TensorboardWriter instance to write to.
     log_batch_size_period : int, optional (default: None)
         If provided, we'll log the average batch sizes to Tensorboard
@@ -41,7 +39,7 @@ class LogToTensorboard(Callback):
         self.param_updates: Dict[str, torch.Tensor] = {}
 
     @handle_event(Events.TRAINING_START)
-    def training_start(self, trainer: "CallbackTrainer"):
+    def training_start(self, trainer):
         # This is an ugly hack to get the tensorboard instance to know about the trainer, because
         # the callbacks are defined before the trainer.
         # TODO: figure out a better way to handle this.
@@ -57,7 +55,7 @@ class LogToTensorboard(Callback):
             self.tensorboard.enable_activation_logging(trainer.model)
 
     @handle_event(Events.BATCH_START)
-    def copy_current_parameters(self, trainer: "CallbackTrainer"):
+    def copy_current_parameters(self, trainer):
         if self.tensorboard.should_log_histograms_this_batch():
             # Get the magnitude of parameter updates for logging
             # We need a copy of current parameters to compute magnitude of updates,
@@ -68,7 +66,7 @@ class LogToTensorboard(Callback):
             }
 
     @handle_event(Events.BATCH_END)
-    def batch_end_logging(self, trainer: "CallbackTrainer"):
+    def batch_end_logging(self, trainer):
         # Log parameter values to tensorboard
         if self.tensorboard.should_log_this_batch():
             self.tensorboard.log_parameter_and_gradient_statistics(
@@ -82,7 +80,7 @@ class LogToTensorboard(Callback):
             )
 
         if self.log_batch_size_period:
-            cur_batch = sum([training_util.get_batch_size(batch) for batch in trainer.batch_group])
+            cur_batch = training_util.get_batch_size(trainer.batch)
             self.cumulative_batch_size += cur_batch
             if (trainer.batches_this_epoch - 1) % self.log_batch_size_period == 0:
                 average = self.cumulative_batch_size / trainer.batches_this_epoch
@@ -102,7 +100,7 @@ class LogToTensorboard(Callback):
             self.tensorboard.log_histograms(trainer.model, self.histogram_parameters)
 
     @handle_event(Events.EPOCH_END)
-    def epoch_end_logging(self, trainer: "CallbackTrainer"):
+    def epoch_end_logging(self, trainer):
         self.tensorboard.log_metrics(
             trainer.train_metrics,
             val_metrics=trainer.val_metrics,
@@ -111,16 +109,18 @@ class LogToTensorboard(Callback):
         )
 
     @handle_event(Events.TRAINING_END)
-    def training_end(self, trainer: "CallbackTrainer"):
+    def training_end(self, trainer):
 
         self.tensorboard.close()
 
     @classmethod
     def from_params(  # type: ignore
-        cls, serialization_dir: str, params: Params
+        cls, serialization_dir: str, params: Params, **extras
     ) -> "LogToTensorboard":
         log_batch_size_period = params.pop_int("log_batch_size_period", None)
         tensorboard = TensorboardWriter.from_params(
             params=params, serialization_dir=serialization_dir, get_batch_num_total=lambda: None
         )
+        # TODO(mattg): remove get_batch_num_total from TensorboardWriter, and instead just add a
+        # method / arguments to tell the writer what batch num we're at.
         return LogToTensorboard(tensorboard, log_batch_size_period)

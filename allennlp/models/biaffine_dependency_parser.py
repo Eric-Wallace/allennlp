@@ -1,4 +1,4 @@
-from typing import Dict, Optional, Tuple, Any, List
+from typing import Dict, Tuple, Any, List
 import logging
 import copy
 
@@ -9,12 +9,12 @@ from torch.nn.modules import Dropout
 import numpy
 
 from allennlp.common.checks import check_dimensions_match, ConfigurationError
-from allennlp.data import Vocabulary
+from allennlp.data import TextFieldTensors, Vocabulary
 from allennlp.modules import Seq2SeqEncoder, TextFieldEmbedder, Embedding, InputVariationalDropout
 from allennlp.modules.matrix_attention.bilinear_matrix_attention import BilinearMatrixAttention
 from allennlp.modules import FeedForward
 from allennlp.models.model import Model
-from allennlp.nn import InitializerApplicator, RegularizerApplicator, Activation
+from allennlp.nn import InitializerApplicator, Activation
 from allennlp.nn.util import get_text_field_mask, get_range_vector
 from allennlp.nn.util import (
     get_device_of,
@@ -26,15 +26,15 @@ from allennlp.training.metrics import AttachmentScores
 
 logger = logging.getLogger(__name__)
 
-POS_TO_IGNORE = {"``", "''", ":", ",", ".", "PU", "PUNCT", "SYM"}
+POS_TO_IGNORE = {"`", "''", ":", ",", ".", "PU", "PUNCT", "SYM"}
 
 
 @Model.register("biaffine_parser")
 class BiaffineDependencyParser(Model):
     """
     This dependency parser follows the model of
-    ` Deep Biaffine Attention for Neural Dependency Parsing (Dozat and Manning, 2016)
-    <https://arxiv.org/abs/1611.01734>`_ .
+    [Deep Biaffine Attention for Neural Dependency Parsing (Dozat and Manning, 2016)]
+    (https://arxiv.org/abs/1611.01734) .
 
     Word representations are generated using a bidirectional LSTM,
     followed by separate biaffine classifiers for pairs of words,
@@ -45,38 +45,36 @@ class BiaffineDependencyParser(Model):
     a MST on a fully connected graph, where nodes are words and edges
     are scored dependency arcs.
 
-    Parameters
-    ----------
-    vocab : ``Vocabulary``, required
+    # Parameters
+
+    vocab : `Vocabulary`, required
         A Vocabulary, required in order to compute sizes for input/output projections.
-    text_field_embedder : ``TextFieldEmbedder``, required
-        Used to embed the ``tokens`` ``TextField`` we get as input to the model.
-    encoder : ``Seq2SeqEncoder``
+    text_field_embedder : `TextFieldEmbedder`, required
+        Used to embed the `tokens` `TextField` we get as input to the model.
+    encoder : `Seq2SeqEncoder`
         The encoder (with its own internal stacking) that we will use to generate representations
         of tokens.
-    tag_representation_dim : ``int``, required.
+    tag_representation_dim : `int`, required.
         The dimension of the MLPs used for dependency tag prediction.
-    arc_representation_dim : ``int``, required.
+    arc_representation_dim : `int`, required.
         The dimension of the MLPs used for head arc prediction.
-    tag_feedforward : ``FeedForward``, optional, (default = None).
+    tag_feedforward : `FeedForward`, optional, (default = None).
         The feedforward network used to produce tag representations.
         By default, a 1 layer feedforward network with an elu activation is used.
-    arc_feedforward : ``FeedForward``, optional, (default = None).
+    arc_feedforward : `FeedForward`, optional, (default = None).
         The feedforward network used to produce arc representations.
         By default, a 1 layer feedforward network with an elu activation is used.
-    pos_tag_embedding : ``Embedding``, optional.
-        Used to embed the ``pos_tags`` ``SequenceLabelField`` we get as input to the model.
-    use_mst_decoding_for_validation : ``bool``, optional (default = True).
+    pos_tag_embedding : `Embedding`, optional.
+        Used to embed the `pos_tags` `SequenceLabelField` we get as input to the model.
+    use_mst_decoding_for_validation : `bool`, optional (default = True).
         Whether to use Edmond's algorithm to find the optimal minimum spanning tree during validation.
         If false, decoding is greedy.
-    dropout : ``float``, optional, (default = 0.0)
+    dropout : `float`, optional, (default = 0.0)
         The variational dropout applied to the output of the encoder and MLP layers.
-    input_dropout : ``float``, optional, (default = 0.0)
+    input_dropout : `float`, optional, (default = 0.0)
         The dropout applied to the embedded text input.
-    initializer : ``InitializerApplicator``, optional (default=``InitializerApplicator()``)
+    initializer : `InitializerApplicator`, optional (default=`InitializerApplicator()`)
         Used to initialize the model parameters.
-    regularizer : ``RegularizerApplicator``, optional (default=``None``)
-        If provided, will be used to calculate the regularization penalty during training.
     """
 
     def __init__(
@@ -93,9 +91,9 @@ class BiaffineDependencyParser(Model):
         dropout: float = 0.0,
         input_dropout: float = 0.0,
         initializer: InitializerApplicator = InitializerApplicator(),
-        regularizer: Optional[RegularizerApplicator] = None,
+        **kwargs,
     ) -> None:
-        super().__init__(vocab, regularizer)
+        super().__init__(vocab, **kwargs)
 
         self.text_field_embedder = text_field_embedder
         self.encoder = encoder
@@ -169,7 +167,7 @@ class BiaffineDependencyParser(Model):
     @overrides
     def forward(
         self,  # type: ignore
-        words: Dict[str, torch.LongTensor],
+        words: TextFieldTensors,
         pos_tags: torch.LongTensor,
         metadata: List[Dict[str, Any]],
         head_tags: torch.LongTensor = None,
@@ -177,52 +175,52 @@ class BiaffineDependencyParser(Model):
     ) -> Dict[str, torch.Tensor]:
 
         """
-        Parameters
-        ----------
-        words : Dict[str, torch.LongTensor], required
-            The output of ``TextField.as_array()``, which should typically be passed directly to a
-            ``TextFieldEmbedder``. This output is a dictionary mapping keys to ``TokenIndexer``
-            tensors.  At its most basic, using a ``SingleIdTokenIndexer`` this is: ``{"tokens":
-            Tensor(batch_size, sequence_length)}``. This dictionary will have the same keys as were used
-            for the ``TokenIndexers`` when you created the ``TextField`` representing your
-            sequence.  The dictionary is designed to be passed directly to a ``TextFieldEmbedder``,
+        # Parameters
+
+        words : TextFieldTensors, required
+            The output of `TextField.as_array()`, which should typically be passed directly to a
+            `TextFieldEmbedder`. This output is a dictionary mapping keys to `TokenIndexer`
+            tensors.  At its most basic, using a `SingleIdTokenIndexer` this is : `{"tokens":
+            Tensor(batch_size, sequence_length)}`. This dictionary will have the same keys as were used
+            for the `TokenIndexers` when you created the `TextField` representing your
+            sequence.  The dictionary is designed to be passed directly to a `TextFieldEmbedder`,
             which knows how to combine different word representations into a single vector per
             token in your input.
-        pos_tags : ``torch.LongTensor``, required
-            The output of a ``SequenceLabelField`` containing POS tags.
+        pos_tags : `torch.LongTensor`, required
+            The output of a `SequenceLabelField` containing POS tags.
             POS tags are required regardless of whether they are used in the model,
             because they are used to filter the evaluation metric to only consider
             heads of words which are not punctuation.
         metadata : List[Dict[str, Any]], optional (default=None)
             A dictionary of metadata for each batch element which has keys:
-                words : ``List[str]``, required.
+                words : `List[str]`, required.
                     The tokens in the original sentence.
-                pos : ``List[str]``, required.
+                pos : `List[str]`, required.
                     The dependencies POS tags for each word.
         head_tags : torch.LongTensor, optional (default = None)
             A torch tensor representing the sequence of integer gold class labels for the arcs
-            in the dependency parse. Has shape ``(batch_size, sequence_length)``.
+            in the dependency parse. Has shape `(batch_size, sequence_length)`.
         head_indices : torch.LongTensor, optional (default = None)
             A torch tensor representing the sequence of integer indices denoting the parent of every
-            word in the dependency parse. Has shape ``(batch_size, sequence_length)``.
+            word in the dependency parse. Has shape `(batch_size, sequence_length)`.
 
-        Returns
-        -------
+        # Returns
+
         An output dictionary consisting of:
-        loss : ``torch.FloatTensor``, optional
+        loss : `torch.FloatTensor`, optional
             A scalar loss to be optimised.
-        arc_loss : ``torch.FloatTensor``
+        arc_loss : `torch.FloatTensor`
             The loss contribution from the unlabeled arcs.
-        loss : ``torch.FloatTensor``, optional
+        loss : `torch.FloatTensor`, optional
             The loss contribution from predicting the dependency
             tags for the gold arcs.
-        heads : ``torch.FloatTensor``
+        heads : `torch.FloatTensor`
             The predicted head indices for each word. A tensor
             of shape (batch_size, sequence_length).
-        head_types : ``torch.FloatTensor``
+        head_types : `torch.FloatTensor`
             The predicted head types for each arc. A tensor
             of shape (batch_size, sequence_length).
-        mask : ``torch.LongTensor``
+        mask : `torch.BoolTensor`
             A mask denoting the padded elements in the batch.
         """
         embedded_text_input = self.text_field_embedder(words)
@@ -267,7 +265,9 @@ class BiaffineDependencyParser(Model):
         return output_dict
 
     @overrides
-    def decode(self, output_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    def make_output_human_readable(
+        self, output_dict: Dict[str, torch.Tensor]
+    ) -> Dict[str, torch.Tensor]:
 
         head_tags = output_dict.pop("head_tags").cpu().detach().numpy()
         heads = output_dict.pop("heads").cpu().detach().numpy()
@@ -291,7 +291,7 @@ class BiaffineDependencyParser(Model):
     def _parse(
         self,
         embedded_text_input: torch.Tensor,
-        mask: torch.LongTensor,
+        mask: torch.BoolTensor,
         head_tags: torch.LongTensor = None,
         head_indices: torch.LongTensor = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -309,7 +309,6 @@ class BiaffineDependencyParser(Model):
             head_indices = torch.cat([head_indices.new_zeros(batch_size, 1), head_indices], 1)
         if head_tags is not None:
             head_tags = torch.cat([head_tags.new_zeros(batch_size, 1), head_tags], 1)
-        float_mask = mask.float()
         encoded_text = self._dropout(encoded_text)
 
         # shape (batch_size, sequence_length, arc_representation_dim)
@@ -323,7 +322,7 @@ class BiaffineDependencyParser(Model):
         attended_arcs = self.arc_attention(head_arc_representation, child_arc_representation)
 
         minus_inf = -1e8
-        minus_mask = (1 - float_mask) * minus_inf
+        minus_mask = ~mask * minus_inf
         attended_arcs = attended_arcs + minus_mask.unsqueeze(2) + minus_mask.unsqueeze(1)
 
         if self.training or not self.use_mst_decoding_for_validation:
@@ -363,50 +362,47 @@ class BiaffineDependencyParser(Model):
         attended_arcs: torch.Tensor,
         head_indices: torch.Tensor,
         head_tags: torch.Tensor,
-        mask: torch.Tensor,
+        mask: torch.BoolTensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Computes the arc and tag loss for a sequence given gold head indices and tags.
 
-        Parameters
-        ----------
-        head_tag_representation : ``torch.Tensor``, required.
+        # Parameters
+
+        head_tag_representation : `torch.Tensor`, required.
             A tensor of shape (batch_size, sequence_length, tag_representation_dim),
             which will be used to generate predictions for the dependency tags
             for the given arcs.
-        child_tag_representation : ``torch.Tensor``, required
+        child_tag_representation : `torch.Tensor`, required
             A tensor of shape (batch_size, sequence_length, tag_representation_dim),
             which will be used to generate predictions for the dependency tags
             for the given arcs.
-        attended_arcs : ``torch.Tensor``, required.
+        attended_arcs : `torch.Tensor`, required.
             A tensor of shape (batch_size, sequence_length, sequence_length) used to generate
             a distribution over attachments of a given word to all other words.
-        head_indices : ``torch.Tensor``, required.
+        head_indices : `torch.Tensor`, required.
             A tensor of shape (batch_size, sequence_length).
             The indices of the heads for every word.
-        head_tags : ``torch.Tensor``, required.
+        head_tags : `torch.Tensor`, required.
             A tensor of shape (batch_size, sequence_length).
             The dependency labels of the heads for every word.
-        mask : ``torch.Tensor``, required.
+        mask : `torch.BoolTensor`, required.
             A mask of shape (batch_size, sequence_length), denoting unpadded
             elements in the sequence.
 
-        Returns
-        -------
-        arc_nll : ``torch.Tensor``, required.
+        # Returns
+
+        arc_nll : `torch.Tensor`, required.
             The negative log likelihood from the arc loss.
-        tag_nll : ``torch.Tensor``, required.
+        tag_nll : `torch.Tensor`, required.
             The negative log likelihood from the arc tag loss.
         """
-        float_mask = mask.float()
         batch_size, sequence_length, _ = attended_arcs.size()
         # shape (batch_size, 1)
         range_vector = get_range_vector(batch_size, get_device_of(attended_arcs)).unsqueeze(1)
         # shape (batch_size, sequence_length, sequence_length)
         normalised_arc_logits = (
-            masked_log_softmax(attended_arcs, mask)
-            * float_mask.unsqueeze(2)
-            * float_mask.unsqueeze(1)
+            masked_log_softmax(attended_arcs, mask) * mask.unsqueeze(2) * mask.unsqueeze(1)
         )
 
         # shape (batch_size, sequence_length, num_head_tags)
@@ -415,7 +411,7 @@ class BiaffineDependencyParser(Model):
         )
         normalised_head_tag_logits = masked_log_softmax(
             head_tag_logits, mask.unsqueeze(-1)
-        ) * float_mask.unsqueeze(-1)
+        ) * mask.unsqueeze(-1)
         # index matrix with shape (batch, sequence_length)
         timestep_index = get_range_vector(sequence_length, get_device_of(attended_arcs))
         child_index = (
@@ -442,7 +438,7 @@ class BiaffineDependencyParser(Model):
         head_tag_representation: torch.Tensor,
         child_tag_representation: torch.Tensor,
         attended_arcs: torch.Tensor,
-        mask: torch.Tensor,
+        mask: torch.BoolTensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Decodes the head and head tag predictions by decoding the unlabeled arcs
@@ -451,26 +447,26 @@ class BiaffineDependencyParser(Model):
         is not guaranteed to produce trees (i.e. there maybe be multiple roots,
         or cycles when children are attached to their parents).
 
-        Parameters
-        ----------
-        head_tag_representation : ``torch.Tensor``, required.
+        # Parameters
+
+        head_tag_representation : `torch.Tensor`, required.
             A tensor of shape (batch_size, sequence_length, tag_representation_dim),
             which will be used to generate predictions for the dependency tags
             for the given arcs.
-        child_tag_representation : ``torch.Tensor``, required
+        child_tag_representation : `torch.Tensor`, required
             A tensor of shape (batch_size, sequence_length, tag_representation_dim),
             which will be used to generate predictions for the dependency tags
             for the given arcs.
-        attended_arcs : ``torch.Tensor``, required.
+        attended_arcs : `torch.Tensor`, required.
             A tensor of shape (batch_size, sequence_length, sequence_length) used to generate
             a distribution over attachments of a given word to all other words.
 
-        Returns
-        -------
-        heads : ``torch.Tensor``
+        # Returns
+
+        heads : `torch.Tensor`
             A tensor of shape (batch_size, sequence_length) representing the
             greedily decoded heads of each word.
-        head_tags : ``torch.Tensor``
+        head_tags : `torch.Tensor`
             A tensor of shape (batch_size, sequence_length) representing the
             dependency tags of the greedily decoded heads of each word.
         """
@@ -480,7 +476,7 @@ class BiaffineDependencyParser(Model):
         )
         # Mask padded tokens, because we only want to consider actual words as heads.
         if mask is not None:
-            minus_mask = (1 - mask).to(dtype=torch.bool).unsqueeze(2)
+            minus_mask = ~mask.unsqueeze(2)
             attended_arcs.masked_fill_(minus_mask, -numpy.inf)
 
         # Compute the heads greedily.
@@ -500,7 +496,7 @@ class BiaffineDependencyParser(Model):
         head_tag_representation: torch.Tensor,
         child_tag_representation: torch.Tensor,
         attended_arcs: torch.Tensor,
-        mask: torch.Tensor,
+        mask: torch.BoolTensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Decodes the head and head tag predictions using the Edmonds' Algorithm
@@ -510,26 +506,26 @@ class BiaffineDependencyParser(Model):
         to the most likely dependency label probability for that arc. The MST is
         then generated from this directed graph.
 
-        Parameters
-        ----------
-        head_tag_representation : ``torch.Tensor``, required.
+        # Parameters
+
+        head_tag_representation : `torch.Tensor`, required.
             A tensor of shape (batch_size, sequence_length, tag_representation_dim),
             which will be used to generate predictions for the dependency tags
             for the given arcs.
-        child_tag_representation : ``torch.Tensor``, required
+        child_tag_representation : `torch.Tensor`, required
             A tensor of shape (batch_size, sequence_length, tag_representation_dim),
             which will be used to generate predictions for the dependency tags
             for the given arcs.
-        attended_arcs : ``torch.Tensor``, required.
+        attended_arcs : `torch.Tensor`, required.
             A tensor of shape (batch_size, sequence_length, sequence_length) used to generate
             a distribution over attachments of a given word to all other words.
 
-        Returns
-        -------
-        heads : ``torch.Tensor``
+        # Returns
+
+        heads : `torch.Tensor`
             A tensor of shape (batch_size, sequence_length) representing the
             greedily decoded heads of each word.
-        head_tags : ``torch.Tensor``
+        head_tags : `torch.Tensor`
             A tensor of shape (batch_size, sequence_length) representing the
             dependency tags of the optimally decoded heads of each word.
         """
@@ -554,7 +550,7 @@ class BiaffineDependencyParser(Model):
 
         # Mask padded tokens, because we only want to consider actual words as heads.
         minus_inf = -1e8
-        minus_mask = (1 - mask.float()) * minus_inf
+        minus_mask = ~mask * minus_inf
         attended_arcs = attended_arcs + minus_mask.unsqueeze(2) + minus_mask.unsqueeze(1)
 
         # Shape (batch_size, sequence_length, sequence_length)
@@ -611,23 +607,23 @@ class BiaffineDependencyParser(Model):
         either gold or predicted heads, depending on whether this function is
         being called to compute the loss, or if it's being called during inference.
 
-        Parameters
-        ----------
-        head_tag_representation : ``torch.Tensor``, required.
+        # Parameters
+
+        head_tag_representation : `torch.Tensor`, required.
             A tensor of shape (batch_size, sequence_length, tag_representation_dim),
             which will be used to generate predictions for the dependency tags
             for the given arcs.
-        child_tag_representation : ``torch.Tensor``, required
+        child_tag_representation : `torch.Tensor`, required
             A tensor of shape (batch_size, sequence_length, tag_representation_dim),
             which will be used to generate predictions for the dependency tags
             for the given arcs.
-        head_indices : ``torch.Tensor``, required.
+        head_indices : `torch.Tensor`, required.
             A tensor of shape (batch_size, sequence_length). The indices of the heads
             for every word.
 
-        Returns
-        -------
-        head_tag_logits : ``torch.Tensor``
+        # Returns
+
+        head_tag_logits : `torch.Tensor`
             A tensor of shape (batch_size, sequence_length, num_head_tags),
             representing logits for predicting a distribution over tags
             for each arc.
@@ -654,29 +650,29 @@ class BiaffineDependencyParser(Model):
         return head_tag_logits
 
     def _get_mask_for_eval(
-        self, mask: torch.LongTensor, pos_tags: torch.LongTensor
+        self, mask: torch.BoolTensor, pos_tags: torch.LongTensor
     ) -> torch.LongTensor:
         """
         Dependency evaluation excludes words are punctuation.
         Here, we create a new mask to exclude word indices which
         have a "punctuation-like" part of speech tag.
 
-        Parameters
-        ----------
-        mask : ``torch.LongTensor``, required.
+        # Parameters
+
+        mask : `torch.BoolTensor`, required.
             The original mask.
-        pos_tags : ``torch.LongTensor``, required.
+        pos_tags : `torch.LongTensor`, required.
             The pos tags for the sequence.
 
-        Returns
-        -------
+        # Returns
+
         A new mask, where any indices equal to labels
         we should be ignoring are masked.
         """
         new_mask = mask.detach()
         for label in self._pos_to_ignore:
-            label_mask = pos_tags.eq(label).long()
-            new_mask = new_mask * (1 - label_mask)
+            label_mask = pos_tags.eq(label)
+            new_mask = new_mask & ~label_mask
         return new_mask
 
     @overrides

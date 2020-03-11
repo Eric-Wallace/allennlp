@@ -7,7 +7,7 @@ class ComposedSeq2SeqTest(ModelTestCase):
     def setUp(self):
         super().setUp()
         self.set_up_model(
-            self.FIXTURES_ROOT / "encoder_decoder" / "composed_seq2seq" / "experiment_lstm.json",
+            self.FIXTURES_ROOT / "encoder_decoder" / "composed_seq2seq" / "experiment.json",
             self.FIXTURES_ROOT / "data" / "seq2seq_copy.tsv",
         )
 
@@ -44,14 +44,15 @@ class ComposedSeq2SeqTest(ModelTestCase):
         self.model.eval()
         training_tensors = self.dataset.as_tensor_dict()
         output_dict = self.model(**training_tensors)
-        decode_output_dict = self.model.decode(output_dict)
-        # ``decode`` should have added a ``predicted_tokens`` field to ``output_dict``. Checking if it's there.
+        decode_output_dict = self.model.make_output_human_readable(output_dict)
+        # `make_output_human_readable` should have added a `predicted_tokens` field to
+        # `output_dict`. Checking if it's there.
         assert "predicted_tokens" in decode_output_dict
 
-        # The output of model.decode should still have 'predicted_tokens' after using
-        # the beam search. To force the beam search, we just remove `target_tokens`
-        # from the input tensors.
+        # The output of model.make_output_human_readable should still have 'predicted_tokens' after
+        # using the beam search. To force the beam search, we just remove `target_tokens` from the
+        # input tensors.
         del training_tensors["target_tokens"]
         output_dict = self.model(**training_tensors)
-        decode_output_dict = self.model.decode(output_dict)
+        decode_output_dict = self.model.make_output_human_readable(output_dict)
         assert "predicted_tokens" in decode_output_dict
