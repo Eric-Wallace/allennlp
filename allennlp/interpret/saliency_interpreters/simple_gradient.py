@@ -99,7 +99,7 @@ class SimpleGradient(SaliencyInterpreter):
             for idx, gradient in enumerate(grad):
                 # print("hook gradients", gradient.requires_grad)
                 if embedding_op == "dot":
-                    summed_across_embedding_dim = self.embedding_dot_product(labeled_instances[idx].fields['tokens'], gradient,cuda)
+                    summed_across_embedding_dim = self.embedding_dot_product(labeled_instances[idx].fields['tokens'], gradient, cuda)
                 elif embedding_op == 'l2':
                     summed_across_embedding_dim = torch.norm(gradient, dim=1)
 
