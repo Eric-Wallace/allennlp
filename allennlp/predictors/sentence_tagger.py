@@ -17,9 +17,8 @@ class SentenceTaggerPredictor(Predictor):
     """
     Predictor for any model that takes in a sentence and returns
     a single set of tags for it.  In particular, it can be used with
-    the :class:`~allennlp.models.crf_tagger.CrfTagger` model
-    and also
-    the :class:`~allennlp.models.simple_tagger.SimpleTagger` model.
+    the [`CrfTagger`](../models/crf_tagger.md) model
+    and also the [`SimpleTagger`](../models/simple_tagger.md) model.
     """
 
     def __init__(
@@ -34,8 +33,8 @@ class SentenceTaggerPredictor(Predictor):
     @overrides
     def _json_to_instance(self, json_dict: JsonDict) -> Instance:
         """
-        Expects JSON that looks like ``{"sentence": "..."}``.
-        Runs the underlying model, and adds the ``"words"`` to the output.
+        Expects JSON that looks like `{"sentence": "..."}`.
+        Runs the underlying model, and adds the `"words"` to the output.
         """
         sentence = json_dict["sentence"]
         tokens = self._tokenizer.tokenize(sentence)

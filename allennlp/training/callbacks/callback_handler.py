@@ -3,7 +3,7 @@ from collections import defaultdict
 import inspect
 import logging
 
-from allennlp.training.trainer_base import TrainerBase
+from allennlp.training.trainer import Trainer
 from allennlp.training.callbacks.callback import Callback
 
 logger = logging.getLogger(__name__)
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 class EventHandler(NamedTuple):
     name: str
     callback: Callback
-    handler: Callable[[TrainerBase], None]
+    handler: Callable[[Trainer], None]
     priority: int
 
 
@@ -22,18 +22,18 @@ def _is_event_handler(member) -> bool:
 
 class CallbackHandler:
     """
-    A ``CallbackHandler`` owns zero or more ``Callback``s, each of which is associated
-    with some "event". It then exposes a ``fire_event`` method, which calls each
+    A `CallbackHandler` owns zero or more `Callback`s, each of which is associated
+    with some "event". It then exposes a `fire_event` method, which calls each
     callback associated with that event ordered by their priorities.
 
     The callbacks take no parameters; instead they read from and write to this handler's
-    ``state``, which should be a Trainer.
+    `state`, which should be a Trainer.
 
-    Parameters
-    ----------
-    callbacks : ``Iterable[Callback]``
+    # Parameters
+
+    callbacks : `Iterable[Callback]`
         The callbacks to be handled.
-    state : ``TrainerBase``
+    state : `Trainer`
         The trainer from which the callbacks will read state
         and to which the callbacks will write state.
     verbose : bool, optional (default = False)
@@ -42,7 +42,7 @@ class CallbackHandler:
     """
 
     def __init__(
-        self, callbacks: Iterable[Callback], state: TrainerBase, verbose: bool = False
+        self, callbacks: Iterable[Callback], state: Trainer, verbose: bool = False
     ) -> None:
         # Set up callbacks
         self._callbacks: Dict[str, List[EventHandler]] = defaultdict(list)
