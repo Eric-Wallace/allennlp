@@ -83,7 +83,7 @@ class Predictor(Registrable):
         new_instances = self.predictions_to_labeled_instances(instance, outputs)
         return new_instances
 
-    def get_gradients(self, instances: List[Instance], cuda:bool) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    def get_gradients(self, instances: List[Instance], cuda:bool, use_autograd=False, bert=False,recording=False) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """
         Gets the gradients of the loss with respect to the model inputs.
         Parameters
@@ -103,16 +103,14 @@ class Predictor(Registrable):
         layer of the model. Calls :func:`backward` on the loss and then removes the
         hooks.
         """
-        # embedding_forward_gradients: List[Tensor] = []
-        # def hook_layers(module, grad_in, grad_out):
-        #     embedding_forward_gradients.append(grad_out[0])
-        
-        
-        embedding_layer = util.find_embedding_layer(self._model)
-        # efhooks: List[RemovableHandle] = embedding_layer.register_forward_hook(hook_layers)
-
         embedding_gradients: List[Tensor] = []
-        hooks: List[RemovableHandle] = self._register_embedding_gradient_hooks(embedding_gradients)
+        if bert:
+            embedding_layer = self._model.bert_model.embeddings.word_embeddings
+            hooks: List[RemovableHandle] = self._register_bert_hooks(embedding_gradients)
+        else:
+            embedding_layer = util.find_embedding_layer(self._model)
+            # efhooks: List[RemovableHandle] = embedding_layer.register_forward_hook(hook_layers)
+            hooks: List[RemovableHandle] = self._register_embedding_gradient_hooks(embedding_gradients)
         dataset = Batch(instances)
         dataset.index_instances(self._model.vocab)
         if cuda:
@@ -121,7 +119,7 @@ class Predictor(Registrable):
             )
         else:
             outputs = self._model.decode(
-                self._model.forward(**dataset.as_tensor_dict())  # type: ignore
+                self._model.forward(**dataset.as_tensor_dict())  
             )
 
         loss = outputs["loss"]
@@ -129,24 +127,92 @@ class Predictor(Registrable):
         # grad, = torch.autograd.grad(loss, x, create_graph=True)
     
         # print(embedding_forward_gradients[0])
-        embedding_gradients_auto = torch.autograd.grad(loss, embedding_layer.weight,create_graph=True)
-        # print(embedding_gradients_auto[0])
-        # print(embedding_gradients_auto[0].shape)
-        # loss.backward(retain_graph=True)   
-        # print("auto grads",grads)
-        # for hook in efhooks:
-        #     hook.remove()
-        # for hook in hooks:
-        #     hook.remove()
-
+        embedding_gradients_auto = []
         grad_dict = dict()
+        create_g = True
+        if recording:
+            create_g = False
+        if use_autograd:
+            print("using autograd")
+            embedding_gradients_auto = torch.autograd.grad(loss, embedding_layer.weight,create_graph=create_g)
+            return grad_dict
+        else:
+            loss.backward(create_graph=True)
+            # embedding_gradients_auto = torch.autograd.grad(loss, embedding_layer.weight,create_graph=create_g)
+            # del embedding_gradients_auto
+            # torch.cuda.empty_cache()
+            # embedding_gradients_auto=[]
+        for hook in hooks:
+            hook.remove()
+        
         for idx, grad in enumerate(embedding_gradients):
             # print("loop embedding grad", grad)
             key = "grad_input_" + str(idx + 1)
             grad_dict[key] = grad
-        
-        return grad_dict, outputs,embedding_gradients_auto
-
+        del embedding_gradients
+        torch.cuda.empty_cache()
+        return grad_dict
+    def get_gradients_autograd(self, instances: List[Instance], cuda:bool, bert=False,recording = False) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        dataset = Batch(instances)
+        dataset.index_instances(self._model.vocab)
+        embedding_outputs = []
+        def hook_layers(module, grad_in, grad_out):
+            embedding_outputs.append(grad_out)
+        hooks = []
+        hooks.append(self._model.bert_model.embeddings.word_embeddings.register_forward_hook(hook_layers))
+        # embedding_gradients = []
+        # hooks2: List[RemovableHandle] = self._register_bert_hooks(embedding_gradients)
+        if cuda:
+            outputs = self._model.decode(
+                self._model.forward(**move_to_device(dataset.as_tensor_dict(),cuda_device=0))  # type: ignore
+            )
+        else:
+            outputs = self._model.decode(
+                self._model.forward(**dataset.as_tensor_dict())  
+            )
+        loss = outputs["loss"]
+        # self._model.zero_grad()
+        # grad, = torch.autograd.grad(loss, x, create_graph=True)
+        embedding_gradients_auto = []
+        # grad_dict = dict()
+        # embedding_layer = self._model.bert_model.embeddings.LayerNorm.weight
+        create_g = True
+        if recording:
+            create_g = False
+        # print(embedding_gradients[0].size())
+        embedding_gradients_auto = torch.autograd.grad(loss, embedding_outputs[0],create_graph=create_g)
+        # print(embedding_gradients_auto[0])
+        # loss.backward(retain_graph=True)
+        # a = torch.equal(embedding_gradients_auto[0],embedding_gradients[0])
+        # if a:
+        #     print("True")
+        # else:
+        #     print("bad")
+        #     exit(0)
+        for hook in hooks:
+            hook.remove()
+        del embedding_outputs
+        torch.cuda.empty_cache()
+        # for idx, grad in enumerate(embedding_gradients):
+        #     # print("loop embedding grad", grad)
+        #     key = "grad_input_" + str(idx + 1)
+        #     grad_dict[key] = grad
+        # return grad_dict
+        return embedding_gradients_auto
+    def _register_bert_hooks(self, embedding_gradients):
+        """
+        Registers a backward hook on the
+        :class:`~allennlp.modules.text_field_embedder.basic_text_field_embbedder.BasicTextFieldEmbedder`
+        class. Used to save the gradients of the embeddings for use in get_gradients()
+        When there are multiple inputs (e.g., a passage and question), the hook
+        will be called multiple times. We append all the embeddings gradients
+        to a list.
+        """
+        def hook_layers(module, grad_in, grad_out):
+            embedding_gradients.append(grad_out[0])
+        backward_hooks = []
+        backward_hooks.append(self._model.bert_model.embeddings.word_embeddings.register_backward_hook(hook_layers))
+        return backward_hooks
     def _register_embedding_gradient_hooks(self, embedding_gradients):
         """
         Registers a backward hook on the

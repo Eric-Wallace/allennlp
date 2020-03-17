@@ -162,5 +162,4 @@ class BucketIterator(DataIterator):
             if move_to_front:
                 batches.insert(0, penultimate_batch)
                 batches.insert(0, last_batch)
-
             yield from batches

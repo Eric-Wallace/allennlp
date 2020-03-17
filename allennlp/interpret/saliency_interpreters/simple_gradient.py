@@ -9,6 +9,7 @@ from allennlp.nn.util import move_to_device
 import numpy as np
 from torch.utils.hooks import RemovableHandle
 from torch import Tensor
+from collections import defaultdict
 @SaliencyInterpreter.register("simple-gradient")
 class SimpleGradient(SaliencyInterpreter):
     def saliency_interpret_from_json(self, inputs: JsonDict) -> JsonDict:
@@ -180,83 +181,88 @@ class SimpleGradient(SaliencyInterpreter):
         final_loss.requires_grad_()
         print(ranks)
         return final_loss, np.mean(ranks)
-    def saliency_interpret_from_instances_pmi(self, labeled_instances, embedding_operator, normalization,variables,normalization2="l1_norm",do_softmax="False") -> JsonDict:
+    def saliency_interpret_from_instances_pmi_sst(self, labeled_instances, embedding_operator, normalization,variables,normalization2="l1_norm",do_softmax="False", cuda = "False",autograd="False",all_low='False') -> JsonDict:
         # Get raw gradients and outputs
-        grads, outputs,embedding_gradients = self.predictor.get_gradients(labeled_instances,True)
-        print("embedding_gradients",len(embedding_gradients))
-        print("grads",grads)
-        final_loss = torch.zeros(1).cuda()
+        use_autograd = True if autograd =="True" else False
+        if cuda == "True":
+            grads, outputs,embedding_gradients = self.predictor.get_gradients(labeled_instances,True,use_autograd)
+        else:
+            grads, outputs,embedding_gradients = self.predictor.get_gradients(labeled_instances,False,use_autograd)
+        # print("***",embedding_gradients)
+        # print("***",grads["grad_input_1"])
+        final_loss = torch.zeros(1)
+        if cuda == "True":
+            final_loss = final_loss.cuda()
         rank = None
         joe_bob_position = 0 # TODO, hardcoded position
-        softmax = torch.nn.Softmax(dim=0)
+        # softmax = torch.nn.Softmax(dim=0)
         # we only handle when we have 1 input at the moment, so this loop does nothing
-        # print(grads.keys())
         get_salient_words = variables["fn"]
         get_rank = variables["fn2"]
         lmbda = variables["lmbda"]
-        ent100 = variables["ent100"]
-        con100 = variables["con100"]
-        neu100 = variables["neu100"]
+        pos100 = variables["pos100"]
+        neg100 = variables["neg100"]
         training_instances = variables["training_instances"]
+        highest_grad = 0
         for key, grad in grads.items():
             # grads_summed_across_batch = torch.sum(grad, axis=0)
             grad.requires_grad_()
-            print(grad.requires_grad)
             if key =="grad_input_2":
                 continue
+            if use_autograd == True:
+                embedding_gradients = embedding_gradients[0]
+                grad = list(range(len(labeled_instances)))
             for idx, gradient in enumerate(grad):
                 # 1 Get rid of embedding dimension 
                 summed_across_embedding_dim = None 
-                if embedding_operator == "dot_product":
-                    batch_tokens = labeled_instances[idx].fields['hypothesis']
-                    batch_tokens = batch_tokens.as_tensor(batch_tokens.get_padding_lengths())
+                batch_tokens = labeled_instances[idx].fields['tokens']
+                batch_tokens = batch_tokens.as_tensor(batch_tokens.get_padding_lengths())
+                if cuda=="True":
                     batch_tokens = move_to_device(batch_tokens, cuda_device=0)
-                    print("gradient:",gradient.shape)
-                    print("batch_tokens:",batch_tokens)
+                print("batch_tokens:",batch_tokens)
+                embeddings = self.predictor._model._text_field_embedder(batch_tokens)
+                # print("embeddings",embeddings.cpu().detach().numpy())
+                embeddings = embeddings.squeeze(0).transpose(1,0)
+                if use_autograd == True:
+                    gradient = embedding_gradients[batch_tokens["tokens"]]
                     embeddings = self.predictor._model._text_field_embedder(batch_tokens)
-                    # print("embeddings",embeddings.cpu().detach().numpy())
-                    embeddings = embeddings.squeeze(0).transpose(1,0)
+                    print("embeddings",embeddings.shape)
+                    if embeddings.shape[0]==1:
+                        embeddings = embeddings.transpose(1,0)
+                    else:
+                        embeddings = embeddings.squeeze(0).transpose(1,0)
+                if embedding_operator == "dot_product":
                     summed_across_embedding_dim = torch.diag(torch.mm(gradient, embeddings))
                 elif embedding_operator == "l2_norm":
                     summed_across_embedding_dim = torch.norm(gradient, dim=1)
-
                 # get grads magnitude
                 normalized_grads = torch.abs(summed_across_embedding_dim)
-                print("before grads_mag:",summed_across_embedding_dim.cpu().detach().numpy())
+                # print("before grads_mag:",summed_across_embedding_dim.cpu().detach().numpy())
                 grads_mag = np.abs(summed_across_embedding_dim.cpu().detach().numpy())
                 print("grads_mag:",grads_mag)
-
-                
+                highest_grad += np.max(grads_mag)
                 # 3 Normalize
-                # if normalization == "l2_norm":
-                #     print("summed_across_embedding_dim",summed_across_embedding_dim.cpu().detach().numpy())
-                #     print("torch.norm(summed_across_embedding_dim)", torch.norm(summed_across_embedding_dim).cpu().detach().numpy())
-                #     normalized_grads = summed_across_embedding_dim / torch.norm(summed_across_embedding_dim)
-                #     print("normalized_grads",normalized_grads.cpu().detach().numpy())
-                # elif normalization == "l1_norm":
-                #     normalized_grads = summed_across_embedding_dim / torch.norm(summed_across_embedding_dim, p=1)
-
-                # if normalization2 == "l2_norm":
-                #     normalized_grads = normalized_grads**2
-                # elif normalization2 == "l1_norm":
-                #     normalized_grads = torch.abs(normalized_grads)
-
-
                 # 4 Generate the mask
             
                 hyp_grad_rank,hyp_grad_sorted = get_rank(grads_mag)
                 print("hyp_grad_rank:",hyp_grad_rank)
                 instance = training_instances[idx]
-                top100 = get_salient_words(instance,ent100,con100,neu100)
-                mask = torch.zeros(grads["grad_input_1"].shape[1]).cuda()
-                for i,token in enumerate(instance["hypothesis"]):
+                top100 = get_salient_words(instance,pos100,neg100)
+                mask = torch.zeros(batch_tokens["tokens"].shape[0])
+                if cuda=="True":
+                    mask = torch.zeros(grads['grad_input_1'].shape[1])
+                    mask = mask.cuda()
+                else:
+                    mask = torch.zeros(batch_tokens["tokens"].shape[0])
+                for i,token in enumerate(instance["tokens"]):
                     word = token.text.lower()
                     if word in top100:
                         print(word)
                         if word == "sleeping":
-                            batch_tokens = labeled_instances[idx].fields['hypothesis']
+                            batch_tokens = labeled_instances[idx].fields['tokens']
                             batch_tokens = batch_tokens.as_tensor(batch_tokens.get_padding_lengths())
-                            batch_tokens = move_to_device(batch_tokens, cuda_device=0)
+                            if cuda=="True":
+                                batch_tokens = move_to_device(batch_tokens, cuda_device=0)
                             embeddings = self.predictor._model._text_field_embedder(batch_tokens)
                             print("embedding",embeddings.shape)
                             print()
@@ -267,116 +273,197 @@ class SimpleGradient(SaliencyInterpreter):
                                     line = line + str(each.cpu().detach().numpy()) +", "
                                 myfile.write("%s\n"%(line))
                         top100[word].append((grads_mag[i], hyp_grad_rank[i],grads_mag))
-                        if hyp_grad_rank[i] <=4:
-                            mask[i] = 1
+                        # if hyp_grad_rank[i] <=4:
+                        mask[i] = 1
                 # normalized_grads = torch.nn.utils.rnn.pad_sequence([final_loss, normalized_grads]).transpose(1, 0)[1]
-                masked_loss = torch.dot(mask,normalized_grads)
+                if all_low =="True":
+                    # masked_loss = 0.5*torch.sum(summed_across_embedding_dim**2)
+                    masked_loss = torch.sum(normalized_grads)
+                else:
+                    masked_loss = torch.dot(mask,normalized_grads)
                 print("mask:",mask)
                 print("masked_loss:",masked_loss)
                 final_loss += masked_loss
-        # final_loss /= grads['grad_input_1'].shape[0]
-        
+        final_loss /= len(labeled_instances)
+        highest_grad /= grads["grad_input_1"].shape[0]
         # L1/L2 norm/sum, -> softmax
-        if do_softmax == "True":
-            final_loss = softmax(final_loss)
+        # if do_softmax == "True":
+        #     final_loss = softmax(final_loss)
         
-         # Note we use absolute value of grad here because we only care about magnitude
+        # Note we use absolute value of grad here because we only care about magnitude
         temp = [(idx, numpy.absolute(grad)) for idx, grad in enumerate(final_loss.cpu().detach().numpy())]
         temp.sort(key=lambda t: t[1], reverse=True)
         rank = [i for i, (idx, grad) in enumerate(temp) if idx == joe_bob_position][0]
-        # print("finetuned loss", final_loss)
-        
-        final_loss = final_loss
-        # print("truncated final_loss", final_loss)
-        final_loss.requires_grad_()
-        return final_loss, outputs, grads_mag,gradient,grad,embedding_gradients
-    def saliency_interpret_from_instances_autograd(self, labeled_instances, embedding_operator, normalization,variables,normalization2="l1_norm",do_softmax="False",cuda = "True") -> JsonDict:
+        # final_loss.requires_grad_()
+        print(final_loss)
+        return final_loss, outputs, grads_mag,gradient,grad,embedding_gradients, highest_grad
+    def saliency_interpret_from_instances_2_model_sst(self, labeled_instances, embedding_operator, normalization,normalization2="l1_norm",do_softmax="False", cuda = "False",autograd="False",all_low='False',bert=False,recording=False) -> JsonDict:
         # Get raw gradients and outputs
+        use_autograd = True if autograd =="True" else False
+        token_id_name = "bert" if bert else "tokens"
         if cuda == "True":
-            grads, outputs,embedding_gradients = self.predictor.get_gradients(labeled_instances,True)
+            embedding_gradients = self.predictor.get_gradients(labeled_instances,True,use_autograd,bert=bert,recording=recording)
         else:
-            grads, outputs,embedding_gradients = self.predictor.get_gradients(labeled_instances,False)
-        print("embedding_gradients",len(embedding_gradients[0]))
-        # print("grads",grads)
+            embedding_gradients = self.predictor.get_gradients(labeled_instances,False,use_autograd,bert=bert,recording=recording)
+        # print("***",embedding_gradients)
+        # print("***",grads["grad_input_1"].size())
         final_loss = torch.zeros(1)
         if cuda == "True":
             final_loss = final_loss.cuda()
-        get_salient_words = variables["fn"]
-        get_rank = variables["fn2"]
-        lmbda = variables["lmbda"]
-        ent100 = variables["ent100"]
-        con100 = variables["con100"]
-        neu100 = variables["neu100"]
-        training_instances = variables["training_instances"]
-        embedding_gradients = embedding_gradients[0]
-        for idx, _ in enumerate(labeled_instances):
-            # 1 Get rid of embedding dimension 
+        # softmax = torch.nn.Softmax(dim=0)
+        # final_loss = torch.norm(torch.sum(torch.abs(grads["grad_input_1"]), dim=1), dim=0)[0] 
+        # return final_loss
+        highest_grad = 0
+        mean_grad = 0
+        grad_mags = []
+        instances = list(range(len(labeled_instances)))
+        if use_autograd == True:
+            embedding_gradients = embedding_gradients[0]
+        for idx, grad in enumerate(instances):
+            # grads_summed_across_batch = torch.sum(grad, axis=0)
+            # grad.requires_grad_()
+
+            if not use_autograd:
+                gradient = embedding_gradients["grad_input_1"][idx]
+            # print(embedding_gradients.size())
+            # 1 Get the tokens for each instance
             summed_across_embedding_dim = None 
-            if embedding_operator == "dot_product":
-                batch_tokens = labeled_instances[idx].fields['hypothesis']
-                batch_tokens = batch_tokens.as_tensor(batch_tokens.get_padding_lengths())
-                if cuda == "True":
-                    batch_tokens = move_to_device(batch_tokens, cuda_device=0)
-                # print("grad shape:",embedding_gradients.shape)
-                print("batch_tokens:",batch_tokens)
-                # print("my effort",embedding_gradients[batch_tokens["tokens"]].shape)
-                # print("my effort",embedding_gradients[batch_tokens["tokens"]])
-                extracted_embedding = embedding_gradients[batch_tokens["tokens"]]
+            # 3 Get rid of gradients dimensions
+            batch_tokens = labeled_instances[idx].fields['tokens']
+            length = len(batch_tokens)
+            batch_tokens = batch_tokens.as_tensor(batch_tokens.get_padding_lengths())
+            if cuda=="True":
+                batch_tokens = move_to_device(batch_tokens, cuda_device=0)
+            # print("batch_tokens:",batch_tokens)
+            if not bert:
                 embeddings = self.predictor._model._text_field_embedder(batch_tokens)
-                # print("embeddings",embeddings.cpu().detach().numpy())
-                embeddings = embeddings.squeeze(0).transpose(1,0)
-                # print(embeddings)
-                summed_across_embedding_dim = torch.diag(torch.mm(extracted_embedding, embeddings))
+            else:
+                embeddings = self.predictor._model.bert_model.embeddings.word_embeddings(batch_tokens[token_id_name])
+            embeddings = embeddings.squeeze(0).transpose(1,0)
+            if use_autograd == True:
+                gradient = embedding_gradients[batch_tokens[token_id_name]]
+                if bert:
+                    embeddings = self.predictor._model.bert_model.embeddings.word_embeddings(batch_tokens[token_id_name])
+                else:
+                    embeddings = self.predictor._model._text_field_embedder(batch_tokens)
+                # print("embeddings",embeddings.shape)
+                if embeddings.shape[0]==1:
+                    embeddings = embeddings.transpose(1,0)
+                else:
+                    embeddings = embeddings.squeeze(0).transpose(1,0)
+            # print(gradient.size(),embeddings.size())
+            if embedding_operator == "dot_product":
+                summed_across_embedding_dim = torch.diag(torch.mm(gradient, embeddings))
             elif embedding_operator == "l2_norm":
-                summed_across_embedding_dim = torch.norm(embedding_gradients, dim=1)
-            normalized_grads = torch.abs(summed_across_embedding_dim)
-            print("before grads_mag:",summed_across_embedding_dim.cpu().detach().numpy())
-            grads_mag = normalized_grads.cpu().detach().numpy()
-            # 3 Normalize
-            # if normalization == "l2_norm":
-            #     print("summed_across_embedding_dim",summed_across_embedding_dim.cpu().detach().numpy())
-            #     print("torch.norm(summed_across_embedding_dim)", torch.norm(summed_across_embedding_dim).cpu().detach().numpy())
-            #     normalized_grads = summed_across_embedding_dim / torch.norm(summed_across_embedding_dim)
-            #     print("normalized_grads",normalized_grads.cpu().detach().numpy())
-            # elif normalization == "l1_norm":
-            #     normalized_grads = summed_across_embedding_dim / torch.norm(summed_across_embedding_dim, p=1)
-
-            # if normalization2 == "l2_norm":
-            #     normalized_grads = normalized_grads**2
-            # elif normalization2 == "l1_norm":
-            #     normalized_grads = torch.abs(normalized_grads)
-            # rank it
-            hyp_grad_rank,hyp_grad_sorted = get_rank(grads_mag)
-            print("hyp_grad_rank:",hyp_grad_rank)
-            instance = training_instances[idx]
-            top100 = get_salient_words(instance,ent100,con100,neu100)
-            mask = torch.zeros(len(batch_tokens["tokens"]))
-            if cuda == "True":
-                mask = mask.cuda()
-            for i,token in enumerate(instance["hypothesis"]):
-                word = token.text.lower()
-                if word in top100:
-                    print(word)
-                    if word == "sleeping":
-                        batch_tokens = labeled_instances[idx].fields['hypothesis']
-                        batch_tokens = batch_tokens.as_tensor(batch_tokens.get_padding_lengths())
-                        if cuda == "True":
-                            batch_tokens = move_to_device(batch_tokens, cuda_device=0)
-                        embeddings = self.predictor._model._text_field_embedder(batch_tokens)
-                        # print("embedding",embeddings.shape)
-                        # print()
-                        with open("sanity_checks/embedding_check.txt", "a") as myfile:
-                            line = ""
-                            for each in embeddings[i]:
-                                # print(each)
-                                line = line + str(each.cpu().detach().numpy()) +", "
-                            myfile.write("%s\n"%(line))
-                    top100[word].append((grads_mag[i], hyp_grad_rank[i],grads_mag))
-                    if hyp_grad_rank[i] <=4:
-                        mask[i] = 1
-
-            masked_loss = torch.dot(mask,normalized_grads)
-            print("mask:",mask)
+                summed_across_embedding_dim = torch.norm(gradient, dim=1)
+            # 4 normalization
+            if normalization == "l1_norm":
+                normalized_grads = torch.abs(summed_across_embedding_dim)
+            grads_mag = np.abs(summed_across_embedding_dim.cpu().detach().numpy())
+            grad_mags.append(grads_mag[:length])
+            cur_max = np.max(grads_mag)
+            highest_grad = np.max([cur_max,highest_grad])
+            mean_grad += np.mean(grads_mag[:length])
+            # if do_softmax == "True":
+            #     print(normalized_grads.size())
+            #     normalized_grads = softmax(normalized_grads)  
+            #     normalized_grads = torch.max(normalized_grads)  
+                # print("softmaxed grads",normalized_grads)
+                # masked_loss = 0.5*torch.sum(summed_across_embedding_dim**2)
+            if all_low == "True":
+                masked_loss = torch.sum(normalized_grads)
+            else:
+                masked_loss = normalized_grads[0]
             # print("masked_loss:",masked_loss)
             final_loss += masked_loss
-        return final_loss,0,0,0,0,0
+        final_loss /= len(labeled_instances)
+        mean_grad /= len(labeled_instances)
+        del embedding_gradients
+        torch.cuda.empty_cache()
+
+        print(final_loss)
+        return final_loss, grad_mags, highest_grad, mean_grad
+    def saliency_interpret_autograd(self, labeled_instances, embedding_operator, normalization,normalization2="l1_norm",do_softmax="False", cuda = "False",autograd="False",all_low='False',bert=False,recording=False) -> JsonDict:
+        # Get raw gradients and outputs
+        use_autograd = True if autograd =="True" else False
+        token_id_name = "bert" if bert else "tokens"
+        if cuda == "True":
+            embedding_gradients = self.predictor.get_gradients_autograd(labeled_instances,True,bert=bert,recording = recording)
+        else:
+            embedding_gradients = self.predictor.get_gradients_autograd(labeled_instances,False,bert=bert,recording=recording)
+        # print("***",embedding_gradients)
+
+        embedding_gradients = embedding_gradients[0]
+        # embedding_gradients = embedding_gradients["grad_input_1"]
+        
+        instances = list(range(len(labeled_instances)))
+        final_loss = torch.zeros(1)
+        if cuda == "True":
+            final_loss = final_loss.cuda()
+        highest_grad = 0
+        mean_grad = 0
+        grad_mags = []
+        # word_count = defaultdict(int)
+        # for idx, gradient in enumerate(instances):
+        #     batch_tokens = labeled_instances[idx].fields['tokens']
+        #     print()
+        #     print(idx)
+        #     print(batch_tokens)
+        #     batch_tokens = batch_tokens.as_tensor(batch_tokens.get_padding_lengths())
+        #     print(batch_tokens)
+        #     token_arr = batch_tokens["bert"].detach().numpy()
+        #     for z in range(len(token_arr)):
+        #         word_count[token_arr[z]] += 1
+        # print(word_count)
+        appeared_tokens = set()
+        for idx, gradient in enumerate(instances):
+                # 1 Get the tokens for each instance
+                summed_across_embedding_dim = None 
+                batch_tokens = labeled_instances[idx].fields['tokens']
+                batch_tokens = batch_tokens.as_tensor(batch_tokens.get_padding_lengths())
+                token_arr = batch_tokens["bert"].detach().numpy()
+                if cuda=="True":
+                    batch_tokens = move_to_device(batch_tokens, cuda_device=0)
+                length = batch_tokens["bert"].size(0)
+                # gradient = embedding_gradients[batch_tokens[token_id_name]]
+                gradient = embedding_gradients[idx]
+                embeddings = self.predictor._model.bert_model.embeddings.word_embeddings(batch_tokens[token_id_name])
+                if embeddings.shape[0]==1:
+                    embeddings = embeddings.transpose(1,0)
+                else:
+                    embeddings = embeddings.squeeze(0).transpose(1,0)
+                if embedding_operator == "dot_product":
+                    summed_across_embedding_dim = torch.diag(torch.mm(gradient, embeddings))
+                elif embedding_operator == "l2_norm":
+                    summed_across_embedding_dim = torch.norm(gradient, dim=1)
+                # 4 normalization
+                if normalization == "l1_norm":
+                    normalized_grads = torch.abs(summed_across_embedding_dim)
+                elif normalization == "l2_norm":
+                    # print(summed_across_embedding_dim.size())
+                    qn = torch.norm(summed_across_embedding_dim, dim=0).detach()
+                    normalized_grads = summed_across_embedding_dim.div(qn.expand_as(summed_across_embedding_dim))
+                    # exit(0)
+                grads_mag = np.abs(summed_across_embedding_dim.cpu().detach().numpy())
+                grad_mags.append(grads_mag[:length])
+                cur_max = np.max(grads_mag)
+                highest_grad = np.max([cur_max,highest_grad])
+                mean_grad += np.mean(grads_mag[:length])
+                # mask = torch.zeros(batch_tokens["bert"].shape[0]).cuda()
+                # for z in range(len(token_arr)):
+                #     if token_arr[z] in appeared_tokens:
+                #         mask[z] = 1
+                #     else:
+                #         appeared_tokens.add(token_arr[z])
+                if all_low == "True":
+                    masked_loss = torch.sum(normalized_grads)
+                    # masked_loss = torch.dot(mask,normalized_grads)
+                else:
+                    masked_loss = normalized_grads[1]
+                final_loss += masked_loss
+        final_loss /= len(labeled_instances)
+        mean_grad /= len(labeled_instances)
+        # exit(0)
+
+        print(final_loss)
+        return final_loss, grad_mags, highest_grad, mean_grad
