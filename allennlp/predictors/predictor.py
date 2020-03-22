@@ -159,13 +159,12 @@ class Predictor(Registrable):
         def hook_layers(module, grad_in, grad_out):
             embedding_outputs.append(grad_out)
         hooks = []
-        hooks.append(self._model.bert_model.embeddings.word_embeddings.register_forward_hook(hook_layers))
+        print(self._model._text_field_embedder._token_embedders["bert"]._matched_embedder.transformer_model.embeddings.word_embeddings)
+        hooks.append(self._model._text_field_embedder._token_embedders["bert"]._matched_embedder.transformer_model.embeddings.word_embeddings.register_forward_hook(hook_layers))
         # embedding_gradients = []
         # hooks2: List[RemovableHandle] = self._register_bert_hooks(embedding_gradients)
         if cuda:
-            outputs = self._model.decode(
-                self._model.forward(**move_to_device(dataset.as_tensor_dict(),cuda_device=0))  # type: ignore
-            )
+            outputs = self._model.forward(**move_to_device(dataset.as_tensor_dict(),cuda_device=0))
         else:
             outputs = self._model.decode(
                 self._model.forward(**dataset.as_tensor_dict())  

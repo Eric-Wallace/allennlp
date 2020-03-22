@@ -391,15 +391,17 @@ class SimpleGradient(SaliencyInterpreter):
             embedding_gradients = self.predictor.get_gradients_autograd(labeled_instances,True,bert=bert,recording = recording)
         else:
             embedding_gradients = self.predictor.get_gradients_autograd(labeled_instances,False,bert=bert,recording=recording)
-        # print("***",embedding_gradients)
-
         embedding_gradients = embedding_gradients[0]
-        # embedding_gradients = embedding_gradients["grad_input_1"]
-        
         instances = list(range(len(labeled_instances)))
-        final_loss = torch.zeros(1)
-        if cuda == "True":
-            final_loss = final_loss.cuda()
+        if all_low == "True":
+            final_loss = torch.zeros(embedding_gradients.size(1))
+            if cuda == "True":
+                final_loss = final_loss.cuda()
+        else:
+            final_loss = torch.zeros(1)
+            if cuda == "True":
+                final_loss = final_loss.cuda()
+        print(final_loss.size(0))
         highest_grad = 0
         mean_grad = 0
         grad_mags = []
@@ -421,10 +423,15 @@ class SimpleGradient(SaliencyInterpreter):
                 summed_across_embedding_dim = None 
                 batch_tokens = labeled_instances[idx].fields['tokens']
                 batch_tokens = batch_tokens.as_tensor(batch_tokens.get_padding_lengths())
-                token_arr = batch_tokens["bert"].detach().numpy()
+                print(labeled_instances[idx])
+                print(labeled_instances[idx].fields['tokens'])
+                print(batch_tokens)
+                # token_arr = batch_tokens["bert"].detach().numpy()
                 if cuda=="True":
                     batch_tokens = move_to_device(batch_tokens, cuda_device=0)
-                length = batch_tokens["bert"].size(0)
+                length = batch_tokens["bert"]["token_ids"].size(0)
+                print(length)
+                exit(0)
                 # gradient = embedding_gradients[batch_tokens[token_id_name]]
                 gradient = embedding_gradients[idx]
                 embeddings = self.predictor._model.bert_model.embeddings.word_embeddings(batch_tokens[token_id_name])
@@ -456,7 +463,8 @@ class SimpleGradient(SaliencyInterpreter):
                 #     else:
                 #         appeared_tokens.add(token_arr[z])
                 if all_low == "True":
-                    masked_loss = torch.sum(normalized_grads)
+                    masked_loss = normalized_grads
+                    # masked_loss = torch.sum(normalized_grads)
                     # masked_loss = torch.dot(mask,normalized_grads)
                 else:
                     masked_loss = normalized_grads[1]
@@ -464,6 +472,4 @@ class SimpleGradient(SaliencyInterpreter):
         final_loss /= len(labeled_instances)
         mean_grad /= len(labeled_instances)
         # exit(0)
-
-        print(final_loss)
         return final_loss, grad_mags, highest_grad, mean_grad
