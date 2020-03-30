@@ -82,7 +82,7 @@ class Predictor(Registrable):
         new_instances = self.predictions_to_labeled_instances(instance, outputs)
         return new_instances
 
-    def get_gradients(self, instances: List[Instance], cuda:bool, auto_grad_on:bool, hook_grads_on:bool, higher_order_grad: bool) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    def get_gradients(self, instances: List[Instance], cuda:bool, auto_grad_on:bool, hook_grads_on:bool, higher_order_grad: bool, model: Model) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """
         Gets the gradients of the loss with respect to the model inputs.
 
@@ -104,17 +104,9 @@ class Predictor(Registrable):
         layer of the model. Calls `backward` on the loss and then removes the
         hooks.
         """
-
-        embedding_layer = util.find_embedding_layer(self._model)
-
-        # token_field = instances[0].fields['tokens']
-        # tensor_tokens = token_field.as_tensor(token_field.get_padding_lengths())
-
         embedding_gradients: List[Tensor] = []
-        # embeddings: List[Tensor] = []
+        hooks: List[RemovableHandle] = self._register_embedding_gradient_hooks(embedding_gradients, model)
 
-        hooks: List[RemovableHandle] = self._register_embedding_gradient_hooks(embedding_gradients)
-        # forward_hooks: List[RemovableHandle] = self._register_forward_hook(embeddings)
         dataset = Batch(instances)
         dataset.index_instances(self._model.vocab)
         dataset_tensor_dict = util.move_to_device(dataset.as_tensor_dict(), self.cuda_device)
@@ -165,7 +157,7 @@ class Predictor(Registrable):
 
         return forward_hooks
 
-    def _register_embedding_gradient_hooks(self, embedding_gradients):
+    def _register_embedding_gradient_hooks(self, embedding_gradients, model: Model):
         """
         Registers a backward hook on the
         [`BasicTextFieldEmbedder`](../modules/text_field_embedders/basic_text_field_embedder.md)
@@ -180,9 +172,10 @@ class Predictor(Registrable):
             embedding_gradients.append(grad_out[0])
 
         backward_hooks = []
-        embedding_layer = util.find_embedding_layer(self._model)
+        embedding_layer = util.find_embedding_layer(model)
         print("embedding layer for hook grads", embedding_layer)
         backward_hooks.append(embedding_layer.register_backward_hook(hook_layers))
+
         return backward_hooks
 
     @contextmanager

@@ -24,3 +24,4 @@ from allennlp.models.masked_language_model import MaskedLanguageModel
 from allennlp.models.next_token_lm import NextTokenLM
 from allennlp.models.basic_classifier import BasicClassifier
 from allennlp.models.srl_bert import SrlBert
+from allennlp.models.two_model_classifier import TwoModelClassifier

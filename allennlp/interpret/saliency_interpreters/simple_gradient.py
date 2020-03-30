@@ -2,6 +2,7 @@ import math
 from typing import List
 import numpy
 import torch
+from allennlp.models.model import Model
 from allennlp.common.util import JsonDict, sanitize
 from allennlp.interpret.saliency_interpreters.saliency_interpreter import SaliencyInterpreter
 from allennlp.nn import util
@@ -20,25 +21,52 @@ class SimpleGradient(SaliencyInterpreter):
         embeddings_list = []
         instances_with_grads = dict()
         for idx, instance in enumerate(labeled_instances):
-            # Hook used for saving embeddings
-            handle = self._register_forward_hook(embeddings_list)
-            grads = self.predictor.get_gradients([instance])[0]
-            handle.remove()
+            if hasattr(self.predictor._model, 'submodels'):
+                grads = dict()
+                embeddings_list_1 = []
+                handle_1 = self._register_forward_hook(embeddings_list_1, self.predictor._model.submodels[0])
+                grad_1 = self.predictor.get_gradients([instance], False, False, False, False, self.predictor._model.submodels[0])
+                handle_1.remove()
 
-            # Gradients come back in the reverse order that they were sent into the network
-            embeddings_list.reverse()
-            for key, grad in grads.items():
-                # Get number at the end of every gradient key (they look like grad_input_[int],
-                # we're getting this [int] part and subtracting 1 for zero-based indexing).
-                # This is then used as an index into the reversed input array to match up the
-                # gradient and its respective embedding.
-                input_idx = int(key[-1]) - 1
-                # The [0] here is undo-ing the batching that happens in get_gradients.
-                emb_grad = numpy.sum(grad[0] * embeddings_list[input_idx], axis=1)
-                norm = numpy.linalg.norm(emb_grad, ord=1)
-                normalized_grad = [math.fabs(e) / norm for e in emb_grad]
-                grads[key] = normalized_grad
+                embeddings_list_2 = []
+                handle_2 = self._register_forward_hook(embeddings_list_2, self.predictor._model.submodels[1])
+                grad_2 = self.predictor.get_gradients([instance], False, False, False, False, self.predictor._model.submodels[0])
+                handle_2.remove()
+                
+                embeddings_list_1.reverse()
+                embeddings_list_2.reverse()
 
+                for key, grad in grad_1.items():
+                    input_idx = int(key[-1]) - 1
+                    emb_grad_1 = numpy.sum(grad_1[key][0].numpy() * embeddings_list_1[input_idx], axis=1)
+                    emb_grad_2 = numpy.sum(grad_2[key][0].numpy() * embeddings_list_2[input_idx], axis=1)
+                    emb_grad = emb_grad_1 + emb_grad_2
+                    norm = numpy.linalg.norm(emb_grad, ord=1)
+                    normalized_grad = [math.fabs(e) / norm for e in emb_grad]
+                    grads[key] = normalized_grad
+                
+            else: 
+                # Hook used for saving embeddings
+                handle = self._register_forward_hook(embeddings_list, self.predictor._model)
+                grads = self.predictor.get_gradients([instance], False, False, False, False, self.predictor._model)
+                print(grads)
+                handle.remove()
+
+                # Gradients come back in the reverse order that they were sent into the network
+                embeddings_list.reverse()
+                for key, grad in grads.items():
+                    # Get number at the end of every gradient key (they look like grad_input_[int],
+                    # we're getting this [int] part and subtracting 1 for zero-based indexing).
+                    # This is then used as an index into the reversed input array to match up the
+                    # gradient and its respective embedding.
+                    input_idx = int(key[-1]) - 1
+                    # The [0] here is undo-ing the batching that happens in get_gradients.
+                    emb_grad = numpy.sum(grad[0].numpy() * embeddings_list[input_idx], axis=1)
+                    norm = numpy.linalg.norm(emb_grad, ord=1)
+                    normalized_grad = [math.fabs(e) / norm for e in emb_grad]
+                    grads[key] = normalized_grad
+
+            
             instances_with_grads["instance_" + str(idx + 1)] = grads
         return sanitize(instances_with_grads)
 
@@ -74,7 +102,7 @@ class SimpleGradient(SaliencyInterpreter):
             instances_with_grads["instance_" + str(idx + 1)] = grads
         return sanitize(instances_with_grads)
 
-    def _register_forward_hook(self, embeddings_list: List):
+    def _register_forward_hook(self, embeddings_list: List, model: Model):
         """
         Finds all of the TextFieldEmbedders, and registers a forward hook onto them. When forward()
         is called, embeddings_list is filled with the embedding values. This is necessary because
@@ -84,7 +112,7 @@ class SimpleGradient(SaliencyInterpreter):
         def forward_hook(module, inputs, output):
             embeddings_list.append(output.squeeze(0).clone().detach().numpy())
 
-        embedding_layer = util.find_embedding_layer(self.predictor._model)
+        embedding_layer = util.find_embedding_layer(model)
         handle = embedding_layer.register_forward_hook(forward_hook)
 
         return handle

@@ -4,6 +4,7 @@ from typing import Dict, Any
 import numpy
 import torch
 
+from allennlp.models.model import Model
 from allennlp.common.util import JsonDict, sanitize
 from allennlp.data import Instance
 from allennlp.interpret.saliency_interpreters.saliency_interpreter import SaliencyInterpreter
@@ -29,19 +30,33 @@ class SmoothGradient(SaliencyInterpreter):
 
         instances_with_grads = dict()
         for idx, instance in enumerate(labeled_instances):
-            # Run smoothgrad
-            grads = self._smooth_grads(instance)
+            
+            if hasattr(self.predictor._model, 'submodels'):
+                grad_1 = self._smooth_grads(instance, self.predictor._model.submodels[0])
+                grad_2 = self._smooth_grads(instance, self.predictor._model.submodels[1])
 
-            # Normalize results
-            for key, grad in grads.items():
-                # TODO (@Eric-Wallace), SmoothGrad is not using times input normalization.
-                # Fine for now, but should fix for consistency.
+                grads = dict()
+                for key, grad in grad_1.items():
+                    emb_grad_1 = numpy.sum(grad_1[key][0].numpy(), axis=1)
+                    emb_grad_2 = numpy.sum(grad_2[key][0].numpy(), axis=1)
+                    emb_grad = emb_grad_1 + emb_grad_2
+                    norm = numpy.linalg.norm(emb_grad, ord=1)
+                    normalized_grad = [math.fabs(e) / norm for e in emb_grad]
+                    grads[key] = normalized_grad
+            else:
+                # Run smoothgrad
+                grads = self._smooth_grads(instance, self.predictor._model)
 
-                # The [0] here is undo-ing the batching that happens in get_gradients.
-                embedding_grad = numpy.sum(grad[0], axis=1)
-                norm = numpy.linalg.norm(embedding_grad, ord=1)
-                normalized_grad = [math.fabs(e) / norm for e in embedding_grad]
-                grads[key] = normalized_grad
+                # Normalize results
+                for key, grad in grads.items():
+                    # TODO (@Eric-Wallace), SmoothGrad is not using times input normalization.
+                    # Fine for now, but should fix for consistency.
+
+                    # The [0] here is undo-ing the batching that happens in get_gradients.
+                    embedding_grad = numpy.sum(grad[0].numpy(), axis=1)
+                    norm = numpy.linalg.norm(embedding_grad, ord=1)
+                    normalized_grad = [math.fabs(e) / norm for e in embedding_grad]
+                    grads[key] = normalized_grad
 
             instances_with_grads["instance_" + str(idx + 1)] = grads
 
@@ -66,11 +81,11 @@ class SmoothGradient(SaliencyInterpreter):
         handle = embedding_layer.register_forward_hook(forward_hook)
         return handle
 
-    def _smooth_grads(self, instance: Instance) -> Dict[str, numpy.ndarray]:
+    def _smooth_grads(self, instance: Instance, model: Model) -> Dict[str, numpy.ndarray]:
         total_gradients: Dict[str, Any] = {}
         for _ in range(self.num_samples):
             handle = self._register_forward_hook(self.stdev)
-            grads = self.predictor.get_gradients([instance])[0]
+            grads = self.predictor.get_gradients([instance], False, False, False, False, model)
             handle.remove()
 
             # Sum gradients
