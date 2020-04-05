@@ -115,6 +115,12 @@ class BasicClassifier(Model):
         loss : torch.FloatTensor, optional
             A scalar loss to be optimised.
         """
+        # this code is temporary ##
+        if "bert" not in tokens:
+            tokens["bert"] = tokens["tokens"]
+            del tokens["tokens"]
+        ###
+
         embedded_text = self._text_field_embedder(tokens)
         mask = get_text_field_mask(tokens)
 

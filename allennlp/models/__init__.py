@@ -13,3 +13,5 @@ from allennlp.models.esim import ESIM
 from allennlp.models.bimpm import BiMpm
 from allennlp.models.graph_parser import GraphParser
 from allennlp.models.basic_classifier import BasicClassifier
+from allennlp.models.two_model_classifier import TwoModelClassifier
+from allennlp.models.masked_language_model import MaskedLanguageModel

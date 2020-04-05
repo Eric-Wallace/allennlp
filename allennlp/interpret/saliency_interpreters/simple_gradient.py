@@ -4,6 +4,7 @@ import numpy
 import torch
 from allennlp.common.util import JsonDict, sanitize
 from allennlp.interpret.saliency_interpreters.saliency_interpreter import SaliencyInterpreter
+from allennlp.models.model import Model
 from allennlp.nn import util
 from allennlp.nn.util import move_to_device
 import numpy as np
@@ -23,26 +24,53 @@ class SimpleGradient(SaliencyInterpreter):
         embeddings_list = []
         instances_with_grads = dict()
         for idx, instance in enumerate(labeled_instances):
-            # Hook used for saving embeddings
-            handle = self._register_forward_hook(embeddings_list)
-            grads = self.predictor.get_gradients([instance])[0]
-            handle.remove()
+            if hasattr(self.predictor._model, 'submodels'):
+                grads = dict()
+                embeddings_list_1 = []
+                handle_1 = self._register_forward_hook(embeddings_list_1, self.predictor._model.submodels[0])
+                grad_1 = self.predictor.get_gradients([instance], False, False, False, False, self.predictor._model.submodels[0])
+                handle_1.remove()
 
-            # Gradients come back in the reverse order that they were sent into the network
-            embeddings_list.reverse()
-            for key, grad in grads.items():
-                # Get number at the end of every gradient key (they look like grad_input_[int],
-                # we're getting this [int] part and subtracting 1 for zero-based indexing).
-                # This is then used as an index into the reversed input array to match up the
-                # gradient and its respective embedding.
-                input_idx = int(key[-1]) - 1
-                # The [0] here is undo-ing the batching that happens in get_gradients.
-                emb_grad = numpy.sum(grad[0] * embeddings_list[input_idx], axis=1)
-                norm = numpy.linalg.norm(emb_grad, ord=1)
-                normalized_grad = [math.fabs(e) / norm for e in emb_grad]
-                grads[key] = normalized_grad
+                embeddings_list_2 = []
+                handle_2 = self._register_forward_hook(embeddings_list_2, self.predictor._model.submodels[1])
+                grad_2 = self.predictor.get_gradients([instance], False, False, False, False, self.predictor._model.submodels[1])
+                handle_2.remove()
+                
+                embeddings_list_1.reverse()
+                embeddings_list_2.reverse()
 
+                for key, grad in grad_1.items():
+                    input_idx = int(key[-1]) - 1
+                    emb_grad_1 = numpy.sum(grad_1[key][0].numpy() * embeddings_list_1[input_idx], axis=1)
+                    emb_grad_2 = numpy.sum(grad_2[key][0].numpy() * embeddings_list_2[input_idx], axis=1)
+                    emb_grad = emb_grad_1 + emb_grad_2
+                    norm = numpy.linalg.norm(emb_grad, ord=1)
+                    normalized_grad = [math.fabs(e) / norm for e in emb_grad]
+                    grads[key] = normalized_grad
+                
+            else: 
+                # Hook used for saving embeddings
+                handle = self._register_forward_hook(embeddings_list, self.predictor._model)
+                grads = self.predictor.get_gradients([instance], False, False, False, False, self.predictor._model)
+                handle.remove()
+
+                # Gradients come back in the reverse order that they were sent into the network
+                embeddings_list.reverse()
+                for key, grad in grads.items():
+                    # Get number at the end of every gradient key (they look like grad_input_[int],
+                    # we're getting this [int] part and subtracting 1 for zero-based indexing).
+                    # This is then used as an index into the reversed input array to match up the
+                    # gradient and its respective embedding.
+                    input_idx = int(key[-1]) - 1
+                    # The [0] here is undo-ing the batching that happens in get_gradients.
+                    emb_grad = numpy.sum(grad[0].numpy() * embeddings_list[input_idx], axis=1)
+                    norm = numpy.linalg.norm(emb_grad, ord=1)
+                    normalized_grad = [math.fabs(e) / norm for e in emb_grad]
+                    grads[key] = normalized_grad
+
+            
             instances_with_grads["instance_" + str(idx + 1)] = grads
+        print(instances_with_grads)
         return sanitize(instances_with_grads)
 
     def saliency_interpret_from_instance(self, labeled_instances) -> JsonDict:
@@ -77,7 +105,7 @@ class SimpleGradient(SaliencyInterpreter):
             instances_with_grads["instance_" + str(idx + 1)] = grads
         return sanitize(instances_with_grads)
 
-    def _register_forward_hook(self, embeddings_list: List):
+    def _register_forward_hook(self, embeddings_list: List, model: Model):
         """
         Finds all of the TextFieldEmbedders, and registers a forward hook onto them. When forward()
         is called, embeddings_list is filled with the embedding values. This is necessary because
@@ -87,7 +115,7 @@ class SimpleGradient(SaliencyInterpreter):
         def forward_hook(module, inputs, output):
             embeddings_list.append(output.squeeze(0).clone().detach().numpy())
 
-        embedding_layer = util.find_embedding_layer(self.predictor._model)
+        embedding_layer = util.find_embedding_layer(model)
         handle = embedding_layer.register_forward_hook(forward_hook)
 
         return handle
@@ -122,65 +150,6 @@ class SimpleGradient(SaliencyInterpreter):
 
             instances_with_grads["instance_" + str(idx + 1)] = grads
         return sanitize(instances_with_grads)
-    def saliency_interpret_from_instances(self, labeled_instances, embedding_operator, normalization,normalization2="l1_norm",do_softmax="False") -> JsonDict:
-     
-        # Get raw gradients and outputs
-        grads, outputs,embedding_gradients = self.predictor.get_gradients(labeled_instances,False)
-
-        final_loss = torch.zeros(1)
-        ranks = [0] * len(labeled_instances)
-        rank = None
-        joe_bob_position = 0 # TODO, hardcoded position
-        softmax = torch.nn.Softmax(dim=0)
-        # we only handle when we have 1 input at the moment, so this loop does nothing
-        # print(grads.keys())
-        for key, grad in grads.items():
-            # grads_summed_across_batch = torch.sum(grad, axis=0)
-            for idx, gradient in enumerate(grad):
-                # Get rid of embedding dimension
-                summed_across_embedding_dim = None 
-                if embedding_operator == "dot_product":
-                    batch_tokens = labeled_instances[idx].fields['tokens']
-                    batch_tokens = batch_tokens.as_tensor(batch_tokens.get_padding_lengths())
-                    embeddings = self.predictor._model._text_field_embedder(batch_tokens)
-                    embeddings = embeddings.squeeze(0).transpose(1,0)
-                    summed_across_embedding_dim = torch.diag(torch.mm(gradient, embeddings))
-                elif embedding_operator == "l2_norm":
-                    summed_across_embedding_dim = torch.norm(gradient, dim=1)
-
-                # Normalize the gradients 
-                normalized_grads = summed_across_embedding_dim
-                if normalization == "l2_norm":
-                    print("summed_across_embedding_dim",summed_across_embedding_dim.detach().numpy())
-                    print("torch.norm(summed_across_embedding_dim)", torch.norm(summed_across_embedding_dim).detach().numpy())
-                    normalized_grads = summed_across_embedding_dim / torch.norm(summed_across_embedding_dim)
-                    print("normalized_grads",normalized_grads.detach().numpy())
-                elif normalization == "l1_norm":
-                    normalized_grads = summed_across_embedding_dim / torch.norm(summed_across_embedding_dim, p=1)
-
-                if normalization2 == "l2_norm":
-                    normalized_grads = normalized_grads**2
-                elif normalization2 == "l1_norm":
-                    normalized_grads = torch.abs(normalized_grads)
-
-                # normalized_grads = torch.nn.utils.rnn.pad_sequence([final_loss, normalized_grads]).transpose(1, 0)[1]
-                temp = [(J, numpy.absolute(grad)) for J, grad in enumerate(normalized_grads.detach().numpy())]
-                temp.sort(key=lambda t: t[1], reverse=True)
-                rank = [i for i, (J, grad) in enumerate(temp) if J == joe_bob_position][0]
-                ranks[idx] = rank
-                final_loss += normalized_grads[joe_bob_position]
-
-        final_loss /= grads['grad_input_1'].shape[0]
-        print("final Loss", final_loss)
-        # L1/L2 norm/sum, -> softmax
-        if do_softmax == "True":
-            final_loss = softmax(final_loss)
-        
-        # print("finetuned loss", final_loss)
-        
-        final_loss.requires_grad_()
-        print(ranks)
-        return final_loss, np.mean(ranks)
     def saliency_interpret_from_instances_pmi_sst(self, labeled_instances, embedding_operator, normalization,variables,normalization2="l1_norm",do_softmax="False", cuda = "False",autograd="False",all_low='False') -> JsonDict:
         # Get raw gradients and outputs
         use_autograd = True if autograd =="True" else False
@@ -386,7 +355,7 @@ class SimpleGradient(SaliencyInterpreter):
     def saliency_interpret_autograd(self, labeled_instances, embedding_operator, normalization,normalization2="l1_norm",do_softmax="False", cuda = "False",autograd="False",all_low='False',bert=False,recording=False) -> JsonDict:
         # Get raw gradients and outputs
         use_autograd = True if autograd =="True" else False
-        token_id_name = "bert" if bert else "tokens"
+        token_id_name = "tokens" if bert else "tokens"
         if cuda == "True":
             embedding_gradients = self.predictor.get_gradients_autograd(labeled_instances,True,bert=bert,recording = recording)
         else:
@@ -398,7 +367,8 @@ class SimpleGradient(SaliencyInterpreter):
             if cuda == "True":
                 final_loss = final_loss.cuda()
         else:
-            final_loss = torch.zeros(1)
+            # final_loss = torch.zeros(1)
+            final_loss = torch.zeros(embedding_gradients.size(1))
             if cuda == "True":
                 final_loss = final_loss.cuda()
         print(final_loss.size(0))
@@ -423,18 +393,19 @@ class SimpleGradient(SaliencyInterpreter):
                 summed_across_embedding_dim = None 
                 batch_tokens = labeled_instances[idx].fields['tokens']
                 batch_tokens = batch_tokens.as_tensor(batch_tokens.get_padding_lengths())
-                print(labeled_instances[idx])
-                print(labeled_instances[idx].fields['tokens'])
-                print(batch_tokens)
+                # print(labeled_instances[idx])
+                # print(labeled_instances[idx].fields['tokens'])
+                # print(batch_tokens)
                 # token_arr = batch_tokens["bert"].detach().numpy()
                 if cuda=="True":
                     batch_tokens = move_to_device(batch_tokens, cuda_device=0)
-                length = batch_tokens["bert"]["token_ids"].size(0)
-                print(length)
-                exit(0)
+                # print(labeled_instances[idx].fields['tokens'].get_padding_lengths())
+                # print(batch_tokens)
+                length = batch_tokens["tokens"]["token_ids"].size(0)
+
                 # gradient = embedding_gradients[batch_tokens[token_id_name]]
                 gradient = embedding_gradients[idx]
-                embeddings = self.predictor._model.bert_model.embeddings.word_embeddings(batch_tokens[token_id_name])
+                embeddings = self.predictor._model._text_field_embedder._token_embedders["tokens"]._matched_embedder.transformer_model.embeddings.word_embeddings(batch_tokens[token_id_name]["token_ids"])
                 if embeddings.shape[0]==1:
                     embeddings = embeddings.transpose(1,0)
                 else:
@@ -450,7 +421,6 @@ class SimpleGradient(SaliencyInterpreter):
                     # print(summed_across_embedding_dim.size())
                     qn = torch.norm(summed_across_embedding_dim, dim=0).detach()
                     normalized_grads = summed_across_embedding_dim.div(qn.expand_as(summed_across_embedding_dim))
-                    # exit(0)
                 grads_mag = np.abs(summed_across_embedding_dim.cpu().detach().numpy())
                 grad_mags.append(grads_mag[:length])
                 cur_max = np.max(grads_mag)
@@ -467,9 +437,9 @@ class SimpleGradient(SaliencyInterpreter):
                     # masked_loss = torch.sum(normalized_grads)
                     # masked_loss = torch.dot(mask,normalized_grads)
                 else:
-                    masked_loss = normalized_grads[1]
-                final_loss += masked_loss
+                    # masked_loss = normalized_grads[1]
+                    masked_loss = normalized_grads
+                final_loss[:length] += masked_loss
         final_loss /= len(labeled_instances)
         mean_grad /= len(labeled_instances)
-        # exit(0)
         return final_loss, grad_mags, highest_grad, mean_grad
