@@ -7,6 +7,7 @@ from allennlp.common.checks import ConfigurationError
 from allennlp.common.params import Params
 from allennlp.models.model import remove_pretrained_embedding_params
 from allennlp.training.metrics import CategoricalAccuracy
+from allennlp.nn import util
 
 @Model.register("two_model_classifier")
 class TwoModelClassifier(Model):
@@ -54,11 +55,33 @@ class TwoModelClassifier(Model):
         probs = torch.nn.functional.softmax(combined_logits, dim=-1)
         output_dict['logits'] = combined_logits 
         output_dict['probs'] = probs
-
+        output_dict["token_ids"] = util.get_token_ids_from_text_field_tensors(tokens)
+        print("forward",output_dict)
         if label is not None:
             loss = self.loss(combined_logits, label.long().view(-1))
             output_dict["loss"] = loss
             self._accuracy(combined_logits, label)
 
         return output_dict 
-
+    
+    def make_output_human_readable(
+        self, output_dict: Dict[str, torch.Tensor]
+    ) -> Dict[str, torch.Tensor]:
+        """
+        Does a simple argmax over the probabilities, converts index to string label, and
+        add `"label"` key to the dictionary with the result.
+        """
+        tokens = []
+        print(output_dict["token_ids"])
+        for instance_tokens in output_dict["token_ids"]:
+            tokens.append(
+                [
+                    self.vocab.get_token_from_index(
+                        token_id.item(),namespace="tags"
+                    )
+                    for token_id in instance_tokens
+                ]
+            )
+        output_dict["tokens"] = tokens
+        print("make output human readable", output_dict)
+        return output_dict

@@ -30,19 +30,23 @@ class SimpleGradient(SaliencyInterpreter):
                 handle_1 = self._register_forward_hook(embeddings_list_1, self.predictor._model.submodels[0])
                 grad_1 = self.predictor.get_gradients([instance], False, False, False, False, self.predictor._model.submodels[0])
                 handle_1.remove()
+                print("first_model's grad",grad_1)
 
                 embeddings_list_2 = []
                 handle_2 = self._register_forward_hook(embeddings_list_2, self.predictor._model.submodels[1])
                 grad_2 = self.predictor.get_gradients([instance], False, False, False, False, self.predictor._model.submodels[1])
                 handle_2.remove()
-                
+                print("second_model's grad",grad_2)
+
                 embeddings_list_1.reverse()
                 embeddings_list_2.reverse()
 
                 for key, grad in grad_1.items():
                     input_idx = int(key[-1]) - 1
                     emb_grad_1 = numpy.sum(grad_1[key][0].numpy() * embeddings_list_1[input_idx], axis=1)
+                    print(emb_grad_1)
                     emb_grad_2 = numpy.sum(grad_2[key][0].numpy() * embeddings_list_2[input_idx], axis=1)
+                    print(emb_grad_2)
                     emb_grad = emb_grad_1 + emb_grad_2
                     norm = numpy.linalg.norm(emb_grad, ord=1)
                     normalized_grad = [math.fabs(e) / norm for e in emb_grad]
@@ -70,7 +74,7 @@ class SimpleGradient(SaliencyInterpreter):
 
             
             instances_with_grads["instance_" + str(idx + 1)] = grads
-        print(instances_with_grads)
+        print("saliency_interpret_from_json",instances_with_grads)
         return sanitize(instances_with_grads)
 
     def saliency_interpret_from_instance(self, labeled_instances) -> JsonDict:
@@ -367,8 +371,8 @@ class SimpleGradient(SaliencyInterpreter):
             if cuda == "True":
                 final_loss = final_loss.cuda()
         else:
-            # final_loss = torch.zeros(1)
-            final_loss = torch.zeros(embedding_gradients.size(1))
+            final_loss = torch.zeros(1)
+            # final_loss = torch.zeros(embedding_gradients.size(1))
             if cuda == "True":
                 final_loss = final_loss.cuda()
         print(final_loss.size(0))
@@ -393,15 +397,11 @@ class SimpleGradient(SaliencyInterpreter):
                 summed_across_embedding_dim = None 
                 batch_tokens = labeled_instances[idx].fields['tokens']
                 batch_tokens = batch_tokens.as_tensor(batch_tokens.get_padding_lengths())
-                # print(labeled_instances[idx])
-                # print(labeled_instances[idx].fields['tokens'])
-                # print(batch_tokens)
-                # token_arr = batch_tokens["bert"].detach().numpy()
                 if cuda=="True":
                     batch_tokens = move_to_device(batch_tokens, cuda_device=0)
                 # print(labeled_instances[idx].fields['tokens'].get_padding_lengths())
                 # print(batch_tokens)
-                length = batch_tokens["tokens"]["token_ids"].size(0)
+                length = batch_tokens[token_id_name]["token_ids"].size(0)
 
                 # gradient = embedding_gradients[batch_tokens[token_id_name]]
                 gradient = embedding_gradients[idx]
@@ -414,13 +414,15 @@ class SimpleGradient(SaliencyInterpreter):
                     summed_across_embedding_dim = torch.diag(torch.mm(gradient, embeddings))
                 elif embedding_operator == "l2_norm":
                     summed_across_embedding_dim = torch.norm(gradient, dim=1)
+
                 # 4 normalization
+                summed_across_embedding_dim = torch.abs(summed_across_embedding_dim)
                 if normalization == "l1_norm":
-                    normalized_grads = torch.abs(summed_across_embedding_dim)
+                    normalized_grads = summed_across_embedding_dim / torch.norm(summed_across_embedding_dim, p=1)
                 elif normalization == "l2_norm":
-                    # print(summed_across_embedding_dim.size())
-                    qn = torch.norm(summed_across_embedding_dim, dim=0).detach()
-                    normalized_grads = summed_across_embedding_dim.div(qn.expand_as(summed_across_embedding_dim))
+                    # qn = torch.norm(summed_across_embedding_dim, dim=0).detach()
+                    # normalized_grads = summed_across_embedding_dim.div(qn.expand_as(summed_across_embedding_dim))
+                    normalized_grads = summed_across_embedding_dim / torch.norm(summed_across_embedding_dim)
                 grads_mag = np.abs(summed_across_embedding_dim.cpu().detach().numpy())
                 grad_mags.append(grads_mag[:length])
                 cur_max = np.max(grads_mag)
@@ -437,9 +439,10 @@ class SimpleGradient(SaliencyInterpreter):
                     # masked_loss = torch.sum(normalized_grads)
                     # masked_loss = torch.dot(mask,normalized_grads)
                 else:
-                    # masked_loss = normalized_grads[1]
-                    masked_loss = normalized_grads
-                final_loss[:length] += masked_loss
+                    masked_loss = normalized_grads[1]
+                    # masked_loss = normalized_grads
+                # final_loss[:length] += masked_loss
+                final_loss += masked_loss
         final_loss /= len(labeled_instances)
         mean_grad /= len(labeled_instances)
         return final_loss, grad_mags, highest_grad, mean_grad

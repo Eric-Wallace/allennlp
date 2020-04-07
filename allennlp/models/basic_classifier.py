@@ -10,6 +10,7 @@ from allennlp.nn import InitializerApplicator
 from allennlp.nn.util import get_text_field_mask
 from allennlp.training.metrics import CategoricalAccuracy
 from allennlp.nn.util import move_to_device
+from allennlp.nn import util
 
 
 @Model.register("basic_classifier")
@@ -116,9 +117,9 @@ class BasicClassifier(Model):
             A scalar loss to be optimised.
         """
         # this code is temporary ##
-        if "bert" not in tokens:
-            tokens["bert"] = tokens["tokens"]
-            del tokens["tokens"]
+        # if "bert" not in tokens:
+        #     tokens["bert"] = tokens["tokens"]
+        #     del tokens["tokens"]
         ###
 
         embedded_text = self._text_field_embedder(tokens)
@@ -139,7 +140,7 @@ class BasicClassifier(Model):
         probs = torch.nn.functional.softmax(logits, dim=-1)
 
         output_dict = {"logits": logits, "probs": probs}
-
+        output_dict["token_ids"] = util.get_token_ids_from_text_field_tensors(tokens)
         if label is not None:
             loss = self._loss(logits, label.long().view(-1))
             output_dict["loss"] = loss
@@ -168,6 +169,19 @@ class BasicClassifier(Model):
             )
             classes.append(label_str)
         output_dict["label"] = classes
+        tokens = []
+        print(output_dict["token_ids"])
+        for instance_tokens in output_dict["token_ids"]:
+            tokens.append(
+                [
+                    self.vocab.get_token_from_index(
+                        token_id.item(),namespace="tags"
+                    )
+                    for token_id in instance_tokens
+                ]
+            )
+        output_dict["tokens"] = tokens
+        print("make output human readable", output_dict)
         return output_dict
 
     def get_metrics(self, reset: bool = False) -> Dict[str, float]:

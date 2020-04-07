@@ -26,3 +26,5 @@ from allennlp.data.dataset_readers.quora_paraphrase import QuoraParaphraseDatase
 from allennlp.data.dataset_readers.babi import BabiReader
 from allennlp.data.dataset_readers.copynet_seq2seq import CopyNetDatasetReader
 from allennlp.data.dataset_readers.text_classification_json import TextClassificationJsonReader
+
+from allennlp.data.dataset_readers.next_token_lm import NextTokenLmReader

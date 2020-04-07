@@ -11,3 +11,4 @@ from allennlp.predictors.coref import CorefPredictor
 from allennlp.predictors.decomposable_attention import DecomposableAttentionPredictor
 from allennlp.predictors.sentence_tagger import SentenceTaggerPredictor
 from allennlp.predictors.text_classifier import TextClassifierPredictor
+from allennlp.predictors.next_token_lm import NextTokenLMPredictor

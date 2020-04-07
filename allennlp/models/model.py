@@ -152,7 +152,7 @@ class Model(torch.nn.Module, Registrable):
             dataset.index_instances(self.vocab)
             model_input = util.move_to_device(dataset.as_tensor_dict(), cuda_device)
             outputs = self.make_output_human_readable(self(**model_input))
-
+            print("forward_on_instances", outputs)
             instance_separated_output: List[Dict[str, numpy.ndarray]] = [
                 {} for _ in dataset.instances
             ]

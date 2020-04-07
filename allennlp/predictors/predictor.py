@@ -62,6 +62,7 @@ class Predictor(Registrable):
 
     def predict_json(self, inputs: JsonDict) -> JsonDict:
         instance = self._json_to_instance(inputs)
+        print("predict_json",instance)
         return self.predict_instance(instance)
 
     def json_to_labeled_instances(self, inputs: JsonDict) -> List[Instance]:
@@ -254,6 +255,10 @@ class Predictor(Registrable):
     def predict_instance(self, instance: Instance) -> JsonDict:
         outputs = self._model.forward_on_instance(instance)
         # return outputs
+        print("predict instance",outputs)
+        # if "tokens" not in outputs:
+        #     outputs["tokens"] = 
+        # print(outputs)
         return sanitize(outputs)        
 
     def predictions_to_labeled_instances(
@@ -369,6 +374,7 @@ class Predictor(Registrable):
             dataset_reader_params = config["validation_dataset_reader"]
         else:
             dataset_reader_params = config["dataset_reader"]
+        print(dataset_reader_params)
         dataset_reader = DatasetReader.from_params(dataset_reader_params)
 
         model = archive.model
