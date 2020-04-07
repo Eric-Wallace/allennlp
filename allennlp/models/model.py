@@ -7,6 +7,10 @@ import logging
 import os
 from typing import Dict, Union, List, Set, Type
 
+try:
+    from apex import amp
+except ImportError:
+    amp = None
 import numpy
 import torch
 
@@ -44,6 +48,11 @@ class Model(torch.nn.Module, Registrable):
     of early stopping and best-model serialization based on a validation metric in
     `Trainer`. Metrics that begin with "_" will not be logged
     to the progress bar by `Trainer`.
+
+    The `from_archive` method on this class is registered as a `Model` with name "from_archive".
+    So, if you are using a configuration file, you can specify a model as `{"type": "from_archive",
+    "archive_file": "/path/to/archive.tar.gz"}`, which will pull out the model from the given
+    location and return it.
 
     # Parameters
 
@@ -261,12 +270,36 @@ class Model(torch.nn.Module, Registrable):
 
         model_params = config.get("model")
 
+        training_params = config.get("trainer", Params({}))
+        opt_level = training_params.get("opt_level")
+
         # The experiment config tells us how to _train_ a model, including where to get pre-trained
         # embeddings from.  We're now _loading_ the model, so those embeddings will already be
         # stored in our weights.  We don't need any pretrained weight file anymore, and we don't
         # want the code to look for it, so we remove it from the parameters here.
         remove_pretrained_embedding_params(model_params)
         model = Model.from_params(vocab=vocab, params=model_params)
+
+        # Force model to cpu or gpu, as appropriate, to make sure that the embeddings are
+        # in sync with the weights
+        if cuda_device >= 0:
+            model.cuda(cuda_device)
+        else:
+            model.cpu()
+
+        # If the model was trained with amp and amp is available, we should re-initialize it with
+        # the opt_level that was used. If the model was trained with amp but amp is not availble, log a warning
+        # so this doesn't pass silently.
+        if opt_level is not None:
+            if amp is None:
+                logger.warning(
+                    (
+                        f"This model was trained with amp (opt_level: {opt_level}) but amp is not available."
+                        " Any further training or inference will happen at full-precision."
+                    )
+                )
+            else:
+                model = amp.initialize(model, opt_level=opt_level)
 
         # If vocab+embedding extension was done, the model initialized from from_params
         # and one defined by state dict in weights_file might not have same embedding shapes.
@@ -278,13 +311,6 @@ class Model(torch.nn.Module, Registrable):
 
         model_state = torch.load(weights_file, map_location=util.device_mapping(cuda_device))
         model.load_state_dict(model_state)
-
-        # Force model to cpu or gpu, as appropriate, to make sure that the embeddings are
-        # in sync with the weights
-        if cuda_device >= 0:
-            model.cuda(cuda_device)
-        else:
-            model.cpu()
 
         return model
 

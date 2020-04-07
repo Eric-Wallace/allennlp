@@ -13,7 +13,7 @@ from allennlp.nn.util import (
     get_text_field_mask,
     masked_softmax,
     weighted_sum,
-    replace_masked_values,
+    masked_max,
 )
 from allennlp.training.metrics import CategoricalAccuracy
 
@@ -24,6 +24,8 @@ class ESIM(Model):
     This `Model` implements the ESIM sequence model described in [Enhanced LSTM for Natural Language Inference]
     (https://www.semanticscholar.org/paper/Enhanced-LSTM-for-Natural-Language-Inference-Chen-Zhu/83e7654d545fbbaaf2328df365a781fb67b841b4)
     by Chen et al., 2017.
+
+    Registered as a `Model` with name "esim".
 
     # Parameters
 
@@ -205,8 +207,8 @@ class ESIM(Model):
 
         # The pooling layer -- max and avg pooling.
         # (batch_size, model_dim)
-        v_a_max, _ = replace_masked_values(v_ai, premise_mask.unsqueeze(-1), -1e7).max(dim=1)
-        v_b_max, _ = replace_masked_values(v_bi, hypothesis_mask.unsqueeze(-1), -1e7).max(dim=1)
+        v_a_max = masked_max(v_ai, premise_mask.unsqueeze(-1), dim=1)
+        v_b_max = masked_max(v_bi, hypothesis_mask.unsqueeze(-1), dim=1)
 
         v_a_avg = torch.sum(v_ai * premise_mask.unsqueeze(-1), dim=1) / torch.sum(
             premise_mask, 1, keepdim=True

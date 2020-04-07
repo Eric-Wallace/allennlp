@@ -28,6 +28,8 @@ class PretrainedTransformerTokenizer(Tokenizer):
     This tokenizer also indexes tokens and adds the indexes to the `Token` fields so that
     they can be picked up by `PretrainedTransformerIndexer`.
 
+    Registered as a `Tokenizer` with name "pretrained_transformer".
+
     # Parameters
 
     model_name : `str`
@@ -103,6 +105,7 @@ class PretrainedTransformerTokenizer(Tokenizer):
             stride=self._stride,
             truncation_strategy=self._truncation_strategy,
             return_tensors=None,
+            return_token_type_ids=True,
         )
         # token_ids contains a final list with ids for both regular and special tokens
         token_ids, token_type_ids = encoded_tokens["input_ids"], encoded_tokens["token_type_ids"]

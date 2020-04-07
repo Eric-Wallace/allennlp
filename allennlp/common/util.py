@@ -179,11 +179,14 @@ def pad_sequence_to_length(
     else:
         padded_sequence = sequence[-desired_length:]
     # Continues to pad with default_value() until we reach the desired length.
-    for _ in range(desired_length - len(padded_sequence)):
-        if padding_on_right:
-            padded_sequence.append(default_value())
-        else:
-            padded_sequence.insert(0, default_value())
+    pad_length = desired_length - len(padded_sequence)
+    # This just creates the default value once, so if it's a list, and if it gets mutated
+    # later, it could cause subtle bugs. But the risk there is low, and this is much faster.
+    values_to_pad = [default_value()] * pad_length
+    if padding_on_right:
+        padded_sequence = padded_sequence + values_to_pad
+    else:
+        padded_sequence = values_to_pad + padded_sequence
     return padded_sequence
 
 
@@ -327,7 +330,8 @@ def prepare_global_logging(
     if os.environ.get("ALLENNLP_DEBUG"):
         LEVEL = logging.DEBUG
     else:
-        LEVEL = logging.INFO
+        level_name = os.environ.get("ALLENNLP_LOG_LEVEL")
+        LEVEL = logging._nameToLevel.get(level_name, logging.INFO)
 
     if rank == 0:
         # stdout/stderr handlers are added only for the
@@ -628,11 +632,13 @@ def is_distributed() -> bool:
 
 def sanitize_wordpiece(wordpiece: str) -> str:
     """
-    Sanitizes wordpieces from BERT or RoBERTa tokenizers.
+    Sanitizes wordpieces from BERT, RoBERTa or ALBERT tokenizers.
     """
     if wordpiece.startswith("##"):
         return wordpiece[2:]
     elif wordpiece.startswith("Ġ"):
+        return wordpiece[1:]
+    elif wordpiece.startswith("▁"):
         return wordpiece[1:]
     else:
         return wordpiece
