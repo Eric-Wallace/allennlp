@@ -82,7 +82,7 @@ class Predictor(Registrable):
         new_instances = self.predictions_to_labeled_instances(instance, outputs)
         return new_instances
 
-    def get_gradients(self, instances: List[Instance], cuda:bool, auto_grad_on:bool, hook_grads_on:bool, higher_order_grad: bool, model: Model) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    def get_gradients(self, instances: List[Instance], cuda:bool, auto_grad_on:bool, hook_grads_on:bool, higher_order_grad: bool) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """
         Gets the gradients of the loss with respect to the model inputs.
 
@@ -105,7 +105,10 @@ class Predictor(Registrable):
         hooks.
         """
         embedding_gradients: List[Tensor] = []
-        hooks: List[RemovableHandle] = self._register_embedding_gradient_hooks(embedding_gradients, model)
+        raw_embeddings: List[Tensor] = []
+
+        # hooks: List[RemovableHandle] = self._register_embedding_gradient_hooks(embedding_gradients)
+        hooks: List[RemovableHandle] = self._register_forward_hook(raw_embeddings)
 
         dataset = Batch(instances)
         dataset.index_instances(self._model.vocab)
@@ -119,11 +122,14 @@ class Predictor(Registrable):
             loss = outputs["loss"]
             self._model.zero_grad()
 
-            # torch.autograd.grad(loss, embedding_layer.weight, create_graph=True)
-            # grad_auto = torch.autograd.grad(loss, embedding_layer.weight, create_graph=True)
-            # print("grad auto", grad_auto[0][tensor_tokens['tokens']])
+            # NOTE: while this will work for SST, this might
+            # mess up the order of grads for tasks with more than one 
+            # input such as SNLI
+            for embedding in raw_embeddings:
+                grad_auto = torch.autograd.grad(loss, embedding, create_graph=higher_order_grad)
+                embedding_gradients.append(grad_auto)
 
-            loss.backward(create_graph=higher_order_grad)
+            # loss.backward(create_graph=higher_order_grad)
 
         for hook in hooks:
             hook.remove()
@@ -157,7 +163,7 @@ class Predictor(Registrable):
 
         return forward_hooks
 
-    def _register_embedding_gradient_hooks(self, embedding_gradients, model: Model):
+    def _register_embedding_gradient_hooks(self, embedding_gradients):
         """
         Registers a backward hook on the
         [`BasicTextFieldEmbedder`](../modules/text_field_embedders/basic_text_field_embedder.md)
@@ -172,7 +178,7 @@ class Predictor(Registrable):
             embedding_gradients.append(grad_out[0])
 
         backward_hooks = []
-        embedding_layer = util.find_embedding_layer(model)
+        embedding_layer = util.find_embedding_layer(self._model)
         print("embedding layer for hook grads", embedding_layer)
         backward_hooks.append(embedding_layer.register_backward_hook(hook_layers))
 

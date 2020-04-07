@@ -30,7 +30,7 @@ class SimpleGradient(SaliencyInterpreter):
 
                 embeddings_list_2 = []
                 handle_2 = self._register_forward_hook(embeddings_list_2, self.predictor._model.submodels[1])
-                grad_2 = self.predictor.get_gradients([instance], False, False, False, False, self.predictor._model.submodels[0])
+                grad_2 = self.predictor.get_gradients([instance], False, False, False, False, self.predictor._model.submodels[1])
                 handle_2.remove()
                 
                 embeddings_list_1.reverse()
