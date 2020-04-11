@@ -121,7 +121,7 @@ class BasicClassifier(Model):
         #     tokens["bert"] = tokens["tokens"]
         #     del tokens["tokens"]
         ###
-
+        print("basic_classifier",tokens)
         embedded_text = self._text_field_embedder(tokens)
         mask = get_text_field_mask(tokens)
 

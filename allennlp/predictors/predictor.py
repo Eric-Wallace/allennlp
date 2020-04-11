@@ -255,7 +255,7 @@ class Predictor(Registrable):
     def predict_instance(self, instance: Instance) -> JsonDict:
         outputs = self._model.forward_on_instance(instance)
         # return outputs
-        print("predict instance",outputs)
+        print("predict instance",outputs["tokens"])
         # if "tokens" not in outputs:
         #     outputs["tokens"] = 
         # print(outputs)
