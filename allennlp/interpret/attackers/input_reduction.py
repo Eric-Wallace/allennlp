@@ -84,6 +84,7 @@ class InputReduction(Attacker):
         candidates = [(instance, -1, tag_mask)]
         # keep removing tokens until prediction is about to change
         while len(current_tokens) > num_ignore_tokens and candidates:
+            print("another one")
             # sort current candidates by smallest length (we want to remove as many tokens as possible)
             def get_length(input_instance: Instance):
                 input_text_field: TextField = input_instance[input_field_to_attack]  # type: ignore
@@ -96,7 +97,7 @@ class InputReduction(Attacker):
             for beam_instance, smallest_idx, tag_mask in beam_candidates:
                 # get gradients and predictions
                 beam_tag_mask = deepcopy(tag_mask)
-                grads, outputs = self.predictor.get_gradients([beam_instance])
+                grads, outputs = self.predictor.get_gradients([beam_instance], False, False, False, False)
 
                 for output in outputs:
                     if isinstance(outputs[output], torch.Tensor):

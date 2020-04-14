@@ -1,5 +1,5 @@
 import math
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 import numpy
 import torch
@@ -32,37 +32,75 @@ class SmoothGradient(SaliencyInterpreter):
 
         instances_with_grads = dict()
         for idx, instance in enumerate(labeled_instances):
-            
-            if hasattr(self.predictor._model, 'submodels'):
-                grad_1 = self._smooth_grads(instance, self.predictor._model.submodels[0])
-                grad_2 = self._smooth_grads(instance, self.predictor._model.submodels[1])
+            # Run smoothgrad
+            grads = self._smooth_grads(instance, self.predictor._model)
 
-                grads = dict()
-                for key, grad in grad_1.items():
-                    emb_grad_1 = numpy.sum(grad_1[key][0].numpy(), axis=1)
-                    emb_grad_2 = numpy.sum(grad_2[key][0].numpy(), axis=1)
-                    emb_grad = emb_grad_1 + emb_grad_2
-                    norm = numpy.linalg.norm(emb_grad, ord=1)
-                    normalized_grad = [math.fabs(e) / norm for e in emb_grad]
-                    grads[key] = normalized_grad
-            else:
-                # Run smoothgrad
-                grads = self._smooth_grads(instance, self.predictor._model)
+            # Normalize results
+            for key, grad in grads.items():
+                # TODO (@Eric-Wallace), SmoothGrad is not using times input normalization.
+                # Fine for now, but should fix for consistency.
 
-                # Normalize results
-                for key, grad in grads.items():
-                    # TODO (@Eric-Wallace), SmoothGrad is not using times input normalization.
-                    # Fine for now, but should fix for consistency.
-
-                    # The [0] here is undo-ing the batching that happens in get_gradients.
-                    embedding_grad = numpy.sum(grad[0].numpy(), axis=1)
-                    norm = numpy.linalg.norm(embedding_grad, ord=1)
-                    normalized_grad = [math.fabs(e) / norm for e in embedding_grad]
-                    grads[key] = normalized_grad
+                # The [0] here is undo-ing the batching that happens in get_gradients.
+                embedding_grad = numpy.sum(grad[0].numpy(), axis=1)
+                norm = numpy.linalg.norm(embedding_grad, ord=1)
+                normalized_grad = [math.fabs(e) / norm for e in embedding_grad]
+                grads[key] = normalized_grad
 
             instances_with_grads["instance_" + str(idx + 1)] = grads
 
         return sanitize(instances_with_grads)
+
+    def sst_interpret_from_instances(self, labeled_instances, embedding_op, normalization, normalization2, cuda: bool, higher_order_grad: bool): 
+        # Get raw gradients and outputs
+
+        norm_grads = []
+        raw_grads = []
+
+        for instance in labeled_instances:
+            embeddings_list = []
+            handle = self._register_forward_hook2(embeddings_list)
+            grads = self._smooth_grads(instance)
+            print("grads from smooth grad", grads)
+
+            for key, grad in grads.items():
+                if embedding_op == "dot":
+                    input_idx = int(key[-1]) - 1
+                    summed_across_embedding_dim = torch.sum(grad[0] * embeddings_list[input_idx], axis=1)
+                elif embedding_op == 'l2':
+                    summed_across_embedding_dim = torch.norm(grad[0], dim=1)
+
+                # Normalize the gradients 
+                normalized_grads = summed_across_embedding_dim
+                if normalization == "l2":
+                    normalized_grads = summed_across_embedding_dim / torch.norm(summed_across_embedding_dim)
+                elif normalization == "l1":
+                    normalized_grads = summed_across_embedding_dim / torch.norm(summed_across_embedding_dim, p=1)
+
+                if normalization2 == "l2":
+                    normalized_grads = normalized_grads**2
+                elif normalization2 == "l1":
+                    normalized_grads = torch.abs(normalized_grads)
+
+                norm_grads.append(normalized_grads)
+                raw_grads.append(summed_across_embedding_dim)
+
+            handle.remove()
+        return norm_grads, raw_grads
+
+    def _register_forward_hook2(self, embeddings_list: List):
+        """
+        Finds all of the TextFieldEmbedders, and registers a forward hook onto them. When forward()
+        is called, embeddings_list is filled with the embedding values. This is necessary because
+        our normalization scheme multiplies the gradient by the embedding value.
+        """
+
+        def forward_hook(module, inputs, output):
+            embeddings_list.append(output.squeeze(0).clone().detach())
+
+        embedding_layer = util.find_embedding_layer(self.predictor._model)
+        handle = embedding_layer.register_forward_hook(forward_hook)
+
+        return handle
 
     def _register_forward_hook(self, stdev: float):
         """
@@ -83,11 +121,11 @@ class SmoothGradient(SaliencyInterpreter):
         handle = embedding_layer.register_forward_hook(forward_hook)
         return handle
 
-    def _smooth_grads(self, instance: Instance, model: Model) -> Dict[str, numpy.ndarray]:
+    def _smooth_grads(self, instance: Instance) -> Dict[str, numpy.ndarray]:
         total_gradients: Dict[str, Any] = {}
         for _ in range(self.num_samples):
             handle = self._register_forward_hook(self.stdev)
-            grads = self.predictor.get_gradients([instance], False, False, False, False, model)
+            grads = self.predictor.get_gradients([instance], False, False, False, False)[0]
             handle.remove()
 
             # Sum gradients

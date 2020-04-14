@@ -6,6 +6,7 @@ import numpy
 from torch.utils.hooks import RemovableHandle
 from torch import Tensor
 from torch import backends
+import torch 
 
 from allennlp.common import Registrable
 from allennlp.common.util import JsonDict, sanitize
@@ -127,9 +128,9 @@ class Predictor(Registrable):
             # NOTE: while this will work for SST, this might
             # mess up the order of grads for tasks with more than one 
             # input such as SNLI
-            for embedding in raw_embeddings:
-                grad_auto = torch.autograd.grad(loss, embedding, create_graph=higher_order_grad)
-                embedding_gradients.append(grad_auto)
+            for i in range(len(raw_embeddings)):
+                grad_auto = torch.autograd.grad(loss, raw_embeddings[0], create_graph=higher_order_grad)
+                embedding_gradients.append(grad_auto[0])
 
             # loss.backward(create_graph=higher_order_grad)
 
@@ -145,7 +146,8 @@ class Predictor(Registrable):
             key = "grad_input_" + str(idx + 1)
             grad_dict[key] = grad
 
-        return grad_dict
+        
+        return (grad_dict, outputs)
 
     def _register_forward_hook(self, embeddings_list: List):
         """
@@ -155,9 +157,7 @@ class Predictor(Registrable):
         """
 
         def forward_hook(module, inputs, output):
-            print("** FORWARD EMBEDDINGS **")
-            print(output)
-            embeddings_list.append(output.squeeze(0))
+            embeddings_list.append(output)
 
         forward_hooks = []
         embedding_layer = util.find_embedding_layer(self._model)

@@ -197,6 +197,7 @@ class Model(torch.nn.Module, Registrable):
         By default in the base class we do nothing.
         """
 
+        print("ENTERING GENERAL")
         return output_dict
 
     def get_metrics(self, reset: bool = False) -> Dict[str, float]:

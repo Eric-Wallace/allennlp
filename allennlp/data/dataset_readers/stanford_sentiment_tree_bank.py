@@ -55,13 +55,11 @@ class StanfordSentimentTreeBankDatasetReader(DatasetReader):
         token_indexers: Dict[str, TokenIndexer] = None,
         use_subtrees: bool = False,
         granularity: str = "5-class",
-        tokenizer=None,
-        **kwargs,
+        **kwargs
     ) -> None:
         super().__init__(**kwargs)
         self._token_indexers = token_indexers or {"tokens": SingleIdTokenIndexer()}
         self._use_subtrees = use_subtrees
-        self._tokenizer = tokenizer 
         allowed_granularities = ["5-class", "3-class", "2-class"]
         if granularity not in allowed_granularities:
             raise ConfigurationError(
@@ -75,7 +73,7 @@ class StanfordSentimentTreeBankDatasetReader(DatasetReader):
     def _read(self, file_path):
         with open(cached_path(file_path), "r") as data_file:
             logger.info("Reading instances from lines in file at: %s", file_path)
-            for line in data_file.readlines()[:10]: 
+            for line in data_file.readlines(): 
                 line = line.strip("\n")
                 if not line:
                     continue
@@ -112,10 +110,8 @@ class StanfordSentimentTreeBankDatasetReader(DatasetReader):
             label : `LabelField`
                 The sentiment label of the sentence or phrase.
         """
-        if self._tokenizer != None:
-            text_field = TextField(self._tokenizer.tokenize(" ".join(tokens)), token_indexers=self._token_indexers)
-        else: 
-            text_field = TextField([Token(x) for x in tokens], token_indexers=self._token_indexers)
+
+        text_field = TextField([Token(x) for x in tokens], token_indexers=self._token_indexers)
         fields: Dict[str, Field] = {"tokens": text_field}
         if sentiment is not None:
             # 0 and 1 are negative sentiment, 2 is neutral, and 3 and 4 are positive sentiment

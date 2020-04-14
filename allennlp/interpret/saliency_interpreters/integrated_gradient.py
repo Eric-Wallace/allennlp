@@ -30,7 +30,7 @@ class IntegratedGradient(SaliencyInterpreter):
             # Normalize results
             for key, grad in grads.items():
                 # The [0] here is undo-ing the batching that happens in get_gradients.
-                embedding_grad = numpy.sum(grad[0], axis=1)
+                embedding_grad = numpy.sum(grad[0].numpy(), axis=1)
                 norm = numpy.linalg.norm(embedding_grad, ord=1)
                 normalized_grad = [math.fabs(e) / norm for e in embedding_grad]
                 grads[key] = normalized_grad
@@ -77,7 +77,7 @@ class IntegratedGradient(SaliencyInterpreter):
             # Hook for modifying embedding value
             handle = self._register_forward_hook(alpha, embeddings_list)
 
-            grads = self.predictor.get_gradients([instance])[0]
+            grads = self.predictor.get_gradients([instance], False, False, False, False)[0]
             handle.remove()
 
             # Running sum of gradients
