@@ -56,7 +56,7 @@ class TwoModelClassifier(Model):
         output_dict['logits'] = combined_logits 
         output_dict['probs'] = probs
         output_dict["token_ids"] = util.get_token_ids_from_text_field_tensors(tokens)
-        print("forward",output_dict)
+        # print("forward",output_dict)
         if label is not None:
             loss = self.loss(combined_logits, label.long().view(-1))
             output_dict["loss"] = loss
@@ -72,7 +72,7 @@ class TwoModelClassifier(Model):
         add `"label"` key to the dictionary with the result.
         """
         tokens = []
-        print(output_dict["token_ids"])
+        # print(output_dict["token_ids"])
         for instance_tokens in output_dict["token_ids"]:
             tokens.append(
                 [
@@ -83,5 +83,5 @@ class TwoModelClassifier(Model):
                 ]
             )
         output_dict["tokens"] = tokens
-        print("make output human readable", output_dict)
+        # print("make output human readable", output_dict)
         return output_dict

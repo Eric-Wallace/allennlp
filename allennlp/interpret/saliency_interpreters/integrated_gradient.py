@@ -4,6 +4,7 @@ from typing import List, Dict, Any
 import numpy
 import torch
 
+from allennlp.models.model import Model
 from allennlp.common.util import JsonDict, sanitize
 from allennlp.data import Instance
 from allennlp.interpret.saliency_interpreters.saliency_interpreter import SaliencyInterpreter
@@ -22,16 +23,44 @@ class IntegratedGradient(SaliencyInterpreter):
 
         instances_with_grads = dict()
         for idx, instance in enumerate(labeled_instances):
-            # Run integrated gradients
-            grads = self._integrate_gradients(instance)
+            if hasattr(self.predictor._model, 'submodels'):
+                # embeddings_list_1 = []
+                # handle_1 = self._register_forward_hook_regular(embeddings_list_1, self.predictor._model.submodels[0])
+                grad_1 = self._integrate_gradients(instance, self.predictor._model.submodels[0])
+                # handle_1.remove()
 
-            # Normalize results
-            for key, grad in grads.items():
-                # The [0] here is undo-ing the batching that happens in get_gradients.
-                embedding_grad = numpy.sum(grad[0], axis=1)
-                norm = numpy.linalg.norm(embedding_grad, ord=1)
-                normalized_grad = [math.fabs(e) / norm for e in embedding_grad]
-                grads[key] = normalized_grad
+                # embeddings_list_2 = []
+                # handle_2 = self._register_forward_hook_regular(embeddings_list_2, self.predictor._model.submodels[1])
+                grad_2 = self._integrate_gradients(instance, self.predictor._model.submodels[1])
+                # handle_2.remove()
+                # embeddings_list_1.reverse()
+                # embeddings_list_2.reverse()
+                # Normalize results
+                grads = dict()
+                for key, grad in grad_1.items():
+                    # The [0] here is undo-ing the batching that happens in get_gradients.
+                    input_idx = int(key[-1]) - 1
+                    # emb_grad_1 = numpy.sum(grad_1[key][0].numpy() * embeddings_list_1[input_idx], axis=1)
+                    # emb_grad_2 = numpy.sum(grad_2[key][0].numpy() * embeddings_list_2[input_idx], axis=1)
+                    emb_grad_1 = numpy.sum(grad_1[key][0].numpy(), axis=1)
+                    emb_grad_2 = numpy.sum(grad_2[key][0].numpy(), axis=1)
+                    embedding_grad = emb_grad_1 + emb_grad_2
+                    print("integrated gradient",embedding_grad)
+                    norm = numpy.linalg.norm(embedding_grad, ord=1)
+                    normalized_grad = [math.fabs(e) / norm for e in embedding_grad]
+                    grads[key] = normalized_grad
+            else:
+                # Run integrated gradients
+                grads = self._integrate_gradients(instance, self.predictor._model)
+
+                # Normalize results
+                for key, grad in grads.items():
+                    # The [0] here is undo-ing the batching that happens in get_gradients.
+                    print(grad[0].numpy())
+                    embedding_grad = numpy.sum(grad[0].numpy(), axis=1)
+                    norm = numpy.linalg.norm(embedding_grad, ord=1)
+                    normalized_grad = [math.fabs(e) / norm for e in embedding_grad]
+                    grads[key] = normalized_grad
 
             instances_with_grads["instance_" + str(idx + 1)] = grads
 
@@ -57,8 +86,21 @@ class IntegratedGradient(SaliencyInterpreter):
         embedding_layer = util.find_embedding_layer(self.predictor._model)
         handle = embedding_layer.register_forward_hook(forward_hook)
         return handle
+    def _register_forward_hook_regular(self, embeddings_list: List, model: Model):
+        """
+        Finds all of the TextFieldEmbedders, and registers a forward hook onto them. When forward()
+        is called, embeddings_list is filled with the embedding values. This is necessary because
+        our normalization scheme multiplies the gradient by the embedding value.
+        """
 
-    def _integrate_gradients(self, instance: Instance) -> Dict[str, numpy.ndarray]:
+        def forward_hook(module, inputs, output):
+            embeddings_list.append(output.squeeze(0).clone().detach().numpy())
+
+        embedding_layer = util.find_embedding_layer(model)
+        handle = embedding_layer.register_forward_hook(forward_hook)
+
+        return handle
+    def _integrate_gradients(self, instance: Instance, model: Model) -> Dict[str, numpy.ndarray]:
         """
         Returns integrated gradients for the given [`Instance`](../../data/instance.md)
         """
@@ -75,7 +117,7 @@ class IntegratedGradient(SaliencyInterpreter):
             # Hook for modifying embedding value
             handle = self._register_forward_hook(alpha, embeddings_list)
 
-            grads = self.predictor.get_gradients([instance])[0]
+            grads = self.predictor.get_gradients([instance], False, False, False, False, model)
             handle.remove()
 
             # Running sum of gradients

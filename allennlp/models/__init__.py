@@ -15,3 +15,4 @@ from allennlp.models.graph_parser import GraphParser
 from allennlp.models.basic_classifier import BasicClassifier
 from allennlp.models.two_model_classifier import TwoModelClassifier
 from allennlp.models.next_token_lm import NextTokenLM
+from allennlp.models.basic_classifier_combined import BasicClassifierCombined

@@ -208,13 +208,13 @@ class Predictor(Registrable):
         to a list.
         """
         def hook_layers(module, grad_in, grad_out):
-            print("GRAD OUT")
-            print(grad_out[0].size())
+            # print("GRAD OUT")
+            # print(grad_out[0].size())
             embedding_gradients.append(grad_out[0])
 
         backward_hooks = []
         embedding_layer = util.find_embedding_layer(model)
-        print("embedding layer for hook grads", embedding_layer)
+        # print("embedding layer for hook grads", embedding_layer)
         backward_hooks.append(embedding_layer.register_backward_hook(hook_layers))
 
         return backward_hooks

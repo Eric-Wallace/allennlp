@@ -154,6 +154,54 @@ class SimpleGradient(SaliencyInterpreter):
 
             instances_with_grads["instance_" + str(idx + 1)] = grads
         return sanitize(instances_with_grads)
+    def _register_forward_hook2(self, embeddings_list: List):
+        """
+        Finds all of the TextFieldEmbedders, and registers a forward hook onto them. When forward()
+        is called, embeddings_list is filled with the embedding values. This is necessary because
+        our normalization scheme multiplies the gradient by the embedding value.
+        """
+
+        def forward_hook(module, inputs, output):
+            embeddings_list.append(output.squeeze(0).clone().detach())
+
+        embedding_layer = util.find_embedding_layer(self.predictor._model)
+        handle = embedding_layer.register_forward_hook(forward_hook)
+
+        return handle
+    def sst_interpret_from_instances(self, labeled_instances, embedding_op, normalization, normalization2, cuda: bool):
+        # Get raw gradients and outputs
+        embeddings_list = []
+        handle = self._register_forward_hook2(embeddings_list)
+
+        grads = self.predictor.get_gradients(labeled_instances, cuda, True, True, False,self.predictor._model)
+
+        norm_grads = []
+        raw_grads = []
+        for key, grad in grads.items():
+            for idx, gradient in enumerate(grad):
+                if embedding_op == "dot":
+                    input_idx = int(key[-1]) - 1
+                    summed_across_embedding_dim = torch.sum(gradient * embeddings_list[input_idx][idx], axis=1)
+                elif embedding_op == 'l2':
+                    summed_across_embedding_dim = torch.norm(gradient, dim=1)
+
+                # Normalize the gradients 
+                normalized_grads = summed_across_embedding_dim
+                if normalization == "l2":
+                    normalized_grads = summed_across_embedding_dim / torch.norm(summed_across_embedding_dim)
+                elif normalization == "l1":
+                    normalized_grads = summed_across_embedding_dim / torch.norm(summed_across_embedding_dim, p=1)
+
+                if normalization2 == "l2":
+                    normalized_grads = normalized_grads**2
+                elif normalization2 == "l1":
+                    normalized_grads = torch.abs(normalized_grads)
+
+                norm_grads.append(normalized_grads)
+                raw_grads.append(summed_across_embedding_dim)
+
+        handle.remove()
+        return norm_grads, raw_grads
     def saliency_interpret_from_instances_pmi_sst(self, labeled_instances, embedding_operator, normalization,variables,normalization2="l1_norm",do_softmax="False", cuda = "False",autograd="False",all_low='False') -> JsonDict:
         # Get raw gradients and outputs
         use_autograd = True if autograd =="True" else False
@@ -406,6 +454,8 @@ class SimpleGradient(SaliencyInterpreter):
                 # gradient = embedding_gradients[batch_tokens[token_id_name]]
                 gradient = embedding_gradients[idx]
                 embeddings = self.predictor._model._text_field_embedder._token_embedders["tokens"]._matched_embedder.transformer_model.embeddings.word_embeddings(batch_tokens[token_id_name]["token_ids"])
+                print(embeddings)
+                exit(0)
                 if embeddings.shape[0]==1:
                     embeddings = embeddings.transpose(1,0)
                 else:

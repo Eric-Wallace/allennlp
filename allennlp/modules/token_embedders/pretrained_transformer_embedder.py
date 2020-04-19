@@ -7,7 +7,7 @@ import torch
 import torch.nn.functional as F
 from transformers import XLNetConfig
 from transformers.modeling_auto import AutoModel
-
+from transformers.configuration_bert import BertConfig
 from allennlp.data.tokenizers import PretrainedTransformerTokenizer
 from allennlp.modules.token_embedders.token_embedder import TokenEmbedder
 from allennlp.nn.util import batched_index_select
@@ -30,9 +30,14 @@ class PretrainedTransformerEmbedder(TokenEmbedder):
         `PretrainedTransformerIndexer`.
     """
 
-    def __init__(self, model_name: str, max_length: int = None) -> None:
+    def __init__(self, model_name: str, max_length: int = None, hidden_size: int = 768) -> None:
         super().__init__()
-        self.transformer_model = AutoModel.from_pretrained(model_name)
+        # this assumes that it is always "bert-base-uncased"
+        # could use BertConfig(model_name)
+        configuration = BertConfig()
+        configuration.hidden_size = hidden_size
+        configuration.num_attention_heads = int(hidden_size/64)
+        self.transformer_model = AutoModel.from_config(configuration)
         self._max_length = max_length
         # I'm not sure if this works for all models; open an issue on github if you find a case
         # where it doesn't work.
@@ -118,7 +123,7 @@ class PretrainedTransformerEmbedder(TokenEmbedder):
         if type_ids is not None:
             parameters["token_type_ids"] = type_ids
         embeddings = self.transformer_model(**parameters)[0]
-
+        print("transformer embedder",embeddings.size())
         if fold_long_sequences:
             embeddings = self._unfold_long_sequences(
                 embeddings, segment_concat_mask, batch_size, num_segment_concat_wordpieces

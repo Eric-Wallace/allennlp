@@ -121,8 +121,9 @@ class BasicClassifier(Model):
         #     tokens["bert"] = tokens["tokens"]
         #     del tokens["tokens"]
         ###
-        print("basic_classifier",tokens)
+        # print("basic_classifier",tokens)
         embedded_text = self._text_field_embedder(tokens)
+        # print("basic_c",embedded_text.size())
         mask = get_text_field_mask(tokens)
 
         if self._seq2seq_encoder:
@@ -170,7 +171,7 @@ class BasicClassifier(Model):
             classes.append(label_str)
         output_dict["label"] = classes
         tokens = []
-        print(output_dict["token_ids"])
+        # print(output_dict["token_ids"])
         for instance_tokens in output_dict["token_ids"]:
             tokens.append(
                 [
@@ -181,7 +182,7 @@ class BasicClassifier(Model):
                 ]
             )
         output_dict["tokens"] = tokens
-        print("make output human readable", output_dict)
+        # print("make output human readable", output_dict)
         return output_dict
 
     def get_metrics(self, reset: bool = False) -> Dict[str, float]:
