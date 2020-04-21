@@ -60,7 +60,6 @@ class SmoothGradient(SaliencyInterpreter):
             embeddings_list = []
             handle = self._register_forward_hook2(embeddings_list)
             grads = self._smooth_grads(instance)
-            print("grads from smooth grad", grads)
 
             for key, grad in grads.items():
                 if embedding_op == "dot":

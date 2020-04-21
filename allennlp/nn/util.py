@@ -1279,6 +1279,8 @@ def batched_span_select(target: torch.Tensor, spans: torch.LongTensor) -> torch.
         A tensor with shape (batch_size, num_spans, max_batch_span_width) representing the mask on
         the returned span embeddings.
     """
+    print("spans shape", spans.shape)
+    print("spans", spans)
     # both of shape (batch_size, num_spans, 1)
     span_starts, span_ends = spans.split(1, dim=-1)
 

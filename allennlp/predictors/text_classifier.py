@@ -6,6 +6,7 @@ import numpy
 
 from allennlp.common.util import JsonDict
 from allennlp.data import Instance
+from allennlp.data.tokenizers import PretrainedTransformerTokenizer
 from allennlp.predictors.predictor import Predictor
 from allennlp.data.fields import LabelField
 from allennlp.data.tokenizers.spacy_tokenizer import SpacyTokenizer
@@ -35,6 +36,7 @@ class TextClassifierPredictor(Predictor):
             self._dataset_reader, "_tokenizer"
         ):
             tokenizer = SpacyTokenizer()
+            # tokenizer = PretrainedTransformerTokenizer('bert-base-uncased')
             sentence = [str(t) for t in tokenizer.tokenize(sentence)]
         return self._dataset_reader.text_to_instance(sentence)
 

@@ -39,6 +39,39 @@ class IntegratedGradient(SaliencyInterpreter):
 
         return sanitize(instances_with_grads)
 
+    def sst_interpret_from_instances(self, labeled_instances, embedding_op, normalization, normalization2, cuda: bool, higher_order_grad: bool): 
+        # Get raw gradients and outputs
+
+        norm_grads = []
+        raw_grads = []
+
+        for instance in labeled_instances:
+            grads = self._integrate_gradients2(instance)
+
+            for key, grad in grads.items():
+                if embedding_op == "dot":
+                    # NOTE: since Integrated Gradients already multiplies by the input, we simply sum here 
+                    summed_across_embedding_dim = torch.sum(grad[0], dim=1)
+                elif embedding_op == 'l2':
+                    summed_across_embedding_dim = torch.norm(grad[0], dim=1)
+
+                # Normalize the gradients 
+                normalized_grads = summed_across_embedding_dim
+                if normalization == "l2":
+                    normalized_grads = summed_across_embedding_dim / torch.norm(summed_across_embedding_dim)
+                elif normalization == "l1":
+                    normalized_grads = summed_across_embedding_dim / torch.norm(summed_across_embedding_dim, p=1)
+
+                if normalization2 == "l2":
+                    normalized_grads = normalized_grads**2
+                elif normalization2 == "l1":
+                    normalized_grads = torch.abs(normalized_grads)
+
+                norm_grads.append(normalized_grads)
+                raw_grads.append(summed_across_embedding_dim)
+
+        return norm_grads, raw_grads
+
     def _register_forward_hook(self, alpha: int, embeddings_list: List):
         """
         Register a forward hook on the embedding layer which scales the embeddings by alpha. Used
@@ -51,6 +84,27 @@ class IntegratedGradient(SaliencyInterpreter):
             # Save the input for later use. Only do so on first call.
             if alpha == 0:
                 embeddings_list.append(output.squeeze(0).clone().detach().numpy())
+
+            # Scale the embedding by alpha
+            output.mul_(alpha)
+
+        # Register the hook
+        embedding_layer = util.find_embedding_layer(self.predictor._model)
+        handle = embedding_layer.register_forward_hook(forward_hook)
+        return handle
+
+    def _register_forward_hook2(self, alpha: int, embeddings_list: List):
+        """
+        Register a forward hook on the embedding layer which scales the embeddings by alpha. Used
+        for one term in the Integrated Gradients sum.
+        We store the embedding output into the embeddings_list when alpha is zero.  This is used
+        later to element-wise multiply the input by the averaged gradients.
+        """
+
+        def forward_hook(module, inputs, output):
+            # Save the input for later use. Only do so on first call.
+            if alpha == 0:
+                embeddings_list.append(output.squeeze(0).clone().detach())
 
             # Scale the embedding by alpha
             output.mul_(alpha)
@@ -101,43 +155,43 @@ class IntegratedGradient(SaliencyInterpreter):
 
         return ig_grads
 
-    def saliency_interpret_from_instances(self, labeled_instances, embedding_operator, normalization) -> JsonDict:
-        for idx, instance in enumerate(labeled_instances):
-            # Run integrated gradients
-            grads = self._integrate_gradients(instance)
+    def _integrate_gradients2(self, instance: Instance) -> Dict[str, numpy.ndarray]:
+        """
+        Returns integrated gradients for the given [`Instance`](../../data/instance.md)
+        """
+        ig_grads: Dict[str, Any] = {}
 
-            final_loss = 0
-            rank = None
+        # List of Embedding inputs
+        embeddings_list: List[numpy.ndarray] = []
 
-            # we only handle when we have 1 input at the moment, so this loop does nothing
-            for key, grad in grads.items():
-                # grads_summed_across_batch = torch.sum(grad, axis=0)
-                for idx, gradient in enumerate(grad):
-                    # Get rid of embedding dimension
-                    summed_across_embedding_dim = None 
-                    if embedding_operator == "l1_norm":
-                        summed_across_embedding_dim = torch.norm(grads_summed_across_batch, p=1, dim=1)
-                    elif embedding_operator == "l2_norm":
-                        summed_across_embedding_dim = torch.norm(gradient, dim=1)
+        # Use 10 terms in the summation approximation of the integral in integrated grad
+        steps = 10
 
-                    # Normalize the gradients 
-                    normalized_grads = None
-                    if normalization == "l2_norm":
-                        normalized_grads = summed_across_embedding_dim / torch.norm(summed_across_embedding_dim)
-                    elif normalization == "l1_norm":
-                        normalized_grads = summed_across_embedding_dim / torch.norm(summed_across_embedding_dim, p=1)
+        # Exclude the endpoint because we do a left point integral approximation
+        for alpha in numpy.linspace(0, 1.0, num=steps, endpoint=False):
+            # Hook for modifying embedding value
+            handle = self._register_forward_hook2(alpha, embeddings_list)
 
-                    # Get the gradient at position of Bob/Joe
-                    joe_bob_position = 0 # TODO, hardcoded position
+            grads = self.predictor.get_gradients([instance], False, False, False, False)[0]
+            handle.remove()
 
-                    # Note we use absolute value of grad here because we only care about magnitude
-                    temp = [(idx, numpy.absolute(grad)) for idx, grad in enumerate(normalized_grads.detach().numpy())]
-                    temp.sort(key=lambda t: t[1], reverse=True)
-                    rank = [i for i, (idx, grad) in enumerate(temp) if idx == joe_bob_position][0]
+            # Running sum of gradients
+            if ig_grads == {}:
+                ig_grads = grads
+            else:
+                for key in grads.keys():
+                    ig_grads[key] += grads[key]
 
-                    final_loss += normalized_grads[joe_bob_position]
-            print("finetuned loss", final_loss)
-            if final_loss < 0:
-                print("YOOOOOOOOOOOOOOOOOOOOOOO")
-            final_loss.requires_grad_()
-            return final_loss, rank
+        # Average of each gradient term
+        for key in ig_grads.keys():
+            ig_grads[key] /= steps
+
+        # Gradients come back in the reverse order that they were sent into the network
+        embeddings_list.reverse()
+
+        # Element-wise multiply average gradient by the input
+        for idx, input_embedding in enumerate(embeddings_list):
+            key = "grad_input_" + str(idx + 1)
+            ig_grads[key] *= input_embedding
+
+        return ig_grads

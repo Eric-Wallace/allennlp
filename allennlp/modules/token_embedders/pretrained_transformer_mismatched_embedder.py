@@ -74,6 +74,8 @@ class PretrainedTransformerMismatchedEmbedder(TokenEmbedder):
             token_ids, wordpiece_mask, type_ids=type_ids, segment_concat_mask=segment_concat_mask
         )
 
+        print("embeddings shape", embeddings.shape)
+        print(embeddings)
         # span_embeddings: (batch_size, num_orig_tokens, max_span_length, embedding_size)
         # span_mask: (batch_size, num_orig_tokens, max_span_length)
         span_embeddings, span_mask = util.batched_span_select(embeddings.contiguous(), offsets)
