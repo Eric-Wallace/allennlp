@@ -349,3 +349,215 @@ class Hotflip(Attacker):
         neg_dir_dot_grad[:, :, self.invalid_replacement_indices] = -numpy.inf
         best_at_each_step = neg_dir_dot_grad.argmax(2)
         return best_at_each_step[0].data[0]
+
+    def attack_from_instance(
+        self,
+        instance,
+        hotflip_record: dict, 
+        input_field_to_attack: str = "tokens",
+        grad_input_field: str = "grad_input_1",
+        ignore_tokens: List[str] = None,
+        target: JsonDict = None,
+    ) -> JsonDict:
+        """
+        Replaces one token at a time from the input until the model's prediction changes.
+        `input_field_to_attack` is for example `tokens`, it says what the input field is
+        called.  `grad_input_field` is for example `grad_input_1`, which is a key into a grads
+        dictionary.
+
+        The method computes the gradient w.r.t. the tokens, finds the token with the maximum
+        gradient (by L2 norm), and replaces it with another token based on the first-order Taylor
+        approximation of the loss.  This process is iteratively repeated until the prediction
+        changes.  Once a token is replaced, it is not flipped again.
+
+        # Parameters
+
+        inputs : `JsonDict`
+            The model inputs, the same as what is passed to a `Predictor`.
+        input_field_to_attack : `str`, optional (default='tokens')
+            The field that has the tokens that we're going to be flipping.  This must be a
+            `TextField`.
+        grad_input_field : `str`, optional (default='grad_input_1')
+            If there is more than one field that gets embedded in your model (e.g., a question and
+            a passage, or a premise and a hypothesis), this tells us the key to use to get the
+            correct gradients.  This selects from the output of :func:`Predictor.get_gradients`.
+        ignore_tokens : `List[str]`, optional (default=DEFAULT_IGNORE_TOKENS)
+            These tokens will not be flipped.  The default list includes some simple punctuation,
+            OOV and padding tokens, and common control tokens for BERT, etc.
+        target : `JsonDict`, optional (default=None)
+            If given, this will be a `targeted` hotflip attack, where instead of just trying to
+            change a model's prediction from what it current is predicting, we try to change it to
+            a `specific` target value.  This is a `JsonDict` because it needs to specify the
+            field name and target value.  For example, for a masked LM, this would be something
+            like `{"words": ["she"]}`, because `"words"` is the field name, there is one mask
+            token (hence the list of length one), and we want to change the prediction from
+            whatever it was to `"she"`.
+        """
+        if self.embedding_matrix is None:
+            self.initialize()
+        ignore_tokens = DEFAULT_IGNORE_TOKENS if ignore_tokens is None else ignore_tokens
+
+        # If `target` is `None`, we move away from the current prediction, otherwise we move
+        # _towards_ the target.
+        sign = -1 if target is None else 1
+        if target is None:
+            output_dict = self.predictor._model.forward_on_instance(instance)
+        else:
+            output_dict = target
+
+        # This now holds the predictions that we want to change (either away from or towards,
+        # depending on whether `target` was passed).  We'll use this in the loop below to check for
+        # when we've met our stopping criterion.
+        original_instances = self.predictor.predictions_to_labeled_instances(instance, output_dict)
+
+        # This is just for ease of access in the UI, so we know the original tokens.  It's not used
+        # in the logic below.
+        original_text_field: TextField = original_instances[0][  # type: ignore
+            input_field_to_attack
+        ]
+        original_tokens = deepcopy(original_text_field.tokens)
+
+        final_tokens = []
+        # `original_instances` is a list because there might be several different predictions that
+        # we're trying to attack (e.g., all of the NER tags for an input sentence).  We attack them
+        # one at a time.
+        for instance in original_instances:
+            # Gets a list of the fields that we want to check to see if they change.
+            fields_to_compare = utils.get_fields_to_compare({"sentence"}, instance, input_field_to_attack)
+
+            # We'll be modifying the tokens in this text field below, and grabbing the modified
+            # list after the `while` loop.
+            text_field: TextField = instance[input_field_to_attack]  # type: ignore
+
+            # Because we can save computation by getting grads and outputs at the same time, we do
+            # them together at the end of the loop, even though we use grads at the beginning and
+            # outputs at the end.  This is our initial gradient for the beginning of the loop.  The
+            # output can be ignored here.
+            grads, outputs = self.predictor.get_gradients([instance], False, False, False, False)
+
+            # Ignore any token that is in the ignore_tokens list by setting the token to already
+            # flipped.
+            flipped: List[int] = []
+            for index, token in enumerate(text_field.tokens):
+                if token.text in ignore_tokens:
+                    flipped.append(index)
+            if "clusters" in outputs:
+                # Coref unfortunately needs a special case here.  We don't want to flip words in
+                # the same predicted coref cluster, but we can't really specify a list of tokens,
+                # because, e.g., "he" could show up in several different clusters.
+                # TODO(mattg): perhaps there's a way to get `predictions_to_labeled_instances` to
+                # return the set of tokens that shouldn't be changed for each instance?  E.g., you
+                # could imagine setting a field on the `Token` object, that we could then read
+                # here...
+                for cluster in outputs["clusters"]:
+                    for mention in cluster:
+                        for index in range(mention[0], mention[1] + 1):
+                            flipped.append(index)
+
+            num_flips = 0
+            while True:
+                # Compute L2 norm of all grads.
+                grad = grads[grad_input_field][0]
+                grads_magnitude = [g.dot(g) for g in grad]
+
+                # only flip a token once
+                for index in flipped:
+                    grads_magnitude[index] = -1
+
+                # We flip the token with highest gradient norm.
+                index_of_token_to_flip = numpy.argmax(grads_magnitude)
+                if grads_magnitude[index_of_token_to_flip] == -1:
+                    # If we've already flipped all of the tokens, we give up.
+                    break
+                flipped.append(index_of_token_to_flip)
+                num_flips += 1
+
+                text_field_tensors = text_field.as_tensor(text_field.get_padding_lengths())
+                input_tokens = util.get_token_ids_from_text_field_tensors(text_field_tensors)
+                original_id_of_token_to_flip = input_tokens[index_of_token_to_flip]
+
+                # Get new token using taylor approximation.
+                new_id = self._first_order_taylor2(
+                    grad[index_of_token_to_flip], original_id_of_token_to_flip, sign
+                )
+
+                # Flip token. We need to tell the instance to re-index itself, so the text field
+                # will actually update.
+                new_token = Token(
+                    self.vocab._index_to_token[self.namespace][new_id],
+                    text_id=new_id,
+                    type_id=0 # NOTE: this is only the case for sentiment analysis, probably have to change this based on the task
+                )  # type: ignore
+                text_field.tokens[index_of_token_to_flip] = new_token
+                instance.indexed = False
+
+                # NOTE: it turns out that the id coming back from taylor is both an index into the vocab as well as
+                # the actual text id, hence the following print statements print the same token 
+                # print("new token", new_token)
+                # print(self.predictor._dataset_reader._extra_tokenizer.tokenizer.convert_ids_to_tokens(new_id, skip_special_tokens=False))
+
+                # Get model predictions on instance, and then label the instances
+                grads, outputs = self.predictor.get_gradients([instance], False, False, False, False)  # predictions
+
+                for key, output in outputs.items():
+                    if isinstance(output, torch.Tensor):
+                        outputs[key] = output.detach().cpu().numpy().squeeze()
+                    elif isinstance(output, list):
+                        outputs[key] = output[0]
+
+                # TODO(mattg): taking the first result here seems brittle, if we're in a case where
+                # there are multiple predictions.
+                labeled_instance = self.predictor.predictions_to_labeled_instances(
+                    instance, outputs
+                )[0]
+
+                # If we've met our stopping criterion, we stop.
+                has_changed = utils.instance_has_changed(labeled_instance, fields_to_compare)
+                if target is None and has_changed:
+                    hotflip_record["has_changed"] = True 
+                    hotflip_record["num_flips"] += num_flips 
+
+                    # With no target, we just want to change the prediction.
+                    break
+                if target is not None and not has_changed:
+                    # With a given target, we want to *match* the target, which we check by
+                    # `not has_changed`.
+                    break
+
+            final_tokens.append(text_field.tokens)
+
+        return sanitize({"final": final_tokens, "original": original_tokens, "outputs": outputs})
+
+    def _first_order_taylor2(self, grad: numpy.ndarray, token_idx: int, sign: int) -> int:
+        """
+        The below code is based on
+        https://github.com/pmichel31415/translate/blob/paul/pytorch_translate/
+        research/adversarial/adversaries/brute_force_adversary.py
+
+        Replaces the current token_idx with another token_idx to increase the loss. In particular, this
+        function uses the grad, alongside the embedding_matrix to select the token that maximizes the
+        first-order taylor approximation of the loss.
+        """
+        grad = util.move_to_device(grad, self.cuda_device)
+        if token_idx >= self.embedding_matrix.size(0):
+            # This happens when we've truncated our fake embedding matrix.  We need to do a dot
+            # product with the word vector of the current token; if that token is out of
+            # vocabulary for our truncated matrix, we need to run it through the embedding layer.
+            inputs = self._make_embedder_input([self.vocab.get_token_from_index(token_idx)])
+            word_embedding = self.embedding_layer(inputs)[0]
+        else:
+            word_embedding = torch.nn.functional.embedding(
+                util.move_to_device(torch.LongTensor([token_idx]), self.cuda_device),
+                self.embedding_matrix,
+            )
+        word_embedding = word_embedding.detach().unsqueeze(0)
+        grad = grad.unsqueeze(0).unsqueeze(0)
+        # solves equation (3) here https://arxiv.org/abs/1903.06620
+        new_embed_dot_grad = torch.einsum("bij,kj->bik", (grad, self.embedding_matrix))
+        prev_embed_dot_grad = torch.einsum("bij,bij->bi", (grad, word_embedding)).unsqueeze(-1)
+        neg_dir_dot_grad = sign * (prev_embed_dot_grad - new_embed_dot_grad)
+        neg_dir_dot_grad = neg_dir_dot_grad.detach().cpu().numpy()
+        # Do not replace with non-alphanumeric tokens
+        neg_dir_dot_grad[:, :, self.invalid_replacement_indices] = -numpy.inf
+        best_at_each_step = neg_dir_dot_grad.argmax(2)
+        return best_at_each_step[0].data[0]
