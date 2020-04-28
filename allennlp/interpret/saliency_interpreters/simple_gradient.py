@@ -457,13 +457,7 @@ class SimpleGradient(SaliencyInterpreter):
 
                 # gradient = embedding_gradients[batch_tokens[token_id_name]]
                 gradient = embedding_gradients[idx]
-<<<<<<< HEAD
                 embeddings = self.predictor._model._text_field_embedder._token_embedders["tokens"].transformer_model.embeddings.word_embeddings(batch_tokens[token_id_name]["token_ids"])
-=======
-                #self.predictor._model._text_field_embedder._token_embedders["tokens"]._matched_embedder.transformer_model.embeddings.word_embeddings
-                embeddings = self.predictor._model._text_field_embedder._token_embedders["tokens"].transformer_model.embeddings.word_embeddings(batch_tokens[token_id_name]["token_ids"])
-
->>>>>>> e9b6589e0dcf61bb8d4140c7a2e1784adc28a55e
                 if embeddings.shape[0]==1:
                     embeddings = embeddings.transpose(1,0)
                 else:
