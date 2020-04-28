@@ -13,7 +13,7 @@ from allennlp.nn.util import move_to_device
 from allennlp.nn import util
 from allennlp.common.params import Params
 import sys
-sys.path.append("/home/junliw/gradient-regularization/utils")
+sys.path.append("/home/junliw1/gradient-regularization/utils")
 from combine_models import merge_models
 @Model.register("basic_classifier_combined")
 class BasicClassifierCombined(Model):

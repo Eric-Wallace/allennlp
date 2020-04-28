@@ -147,7 +147,7 @@ class Predictor(Registrable):
             embedding_outputs.append(grad_out)
         hooks = []
         # print(self._model._text_field_embedder._token_embedders["bert"]._matched_embedder.transformer_model.embeddings.word_embeddings)
-        hooks.append(self._model._text_field_embedder._token_embedders["tokens"]._matched_embedder.transformer_model.embeddings.word_embeddings.register_forward_hook(hook_layers))
+        hooks.append(self._model._text_field_embedder._token_embedders["tokens"].transformer_model.embeddings.word_embeddings.register_forward_hook(hook_layers))
         # embedding_gradients = []
         # hooks2: List[RemovableHandle] = self._register_bert_hooks(embedding_gradients)
         if cuda:
