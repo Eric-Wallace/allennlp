@@ -137,7 +137,7 @@ class Predictor(Registrable):
             key = "grad_input_" + str(idx + 1)
             grad_dict[key] = grad
 
-        return grad_dict
+        return grad_dict,outputs
 
     def get_gradients_autograd(self, instances: List[Instance], cuda:bool, bert=False,recording = False) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         dataset = Batch(instances)
@@ -147,7 +147,7 @@ class Predictor(Registrable):
             embedding_outputs.append(grad_out)
         hooks = []
         # print(self._model._text_field_embedder._token_embedders["bert"]._matched_embedder.transformer_model.embeddings.word_embeddings)
-        hooks.append(self._model._text_field_embedder._token_embedders["tokens"]._matched_embedder.transformer_model.embeddings.word_embeddings.register_forward_hook(hook_layers))
+        hooks.append(self._model._text_field_embedder._token_embedders["tokens"].transformer_model.embeddings.word_embeddings.register_forward_hook(hook_layers))
         # embedding_gradients = []
         # hooks2: List[RemovableHandle] = self._register_bert_hooks(embedding_gradients)
         if cuda:

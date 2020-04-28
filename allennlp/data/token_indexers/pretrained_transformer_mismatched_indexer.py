@@ -83,12 +83,14 @@ class PretrainedTransformerMismatchedIndexer(TokenIndexer):
         self, tokens: IndexedTokenList, padding_lengths: Dict[str, int]
     ) -> Dict[str, torch.Tensor]:
         tokens = tokens.copy()
+        print("indexer",tokens)
         padding_lengths = padding_lengths.copy()
 
         offsets_tokens = tokens.pop("offsets")
         offsets_padding_lengths = padding_lengths.pop("offsets")
-
+        print("indexer",tokens)
         tensor_dict = self._matched_indexer.as_padded_tensor_dict(tokens, padding_lengths)
+        print("indexer",tensor_dict)
         tensor_dict["offsets"] = torch.LongTensor(
             pad_sequence_to_length(
                 offsets_tokens, offsets_padding_lengths, default_value=lambda: (0, 0)

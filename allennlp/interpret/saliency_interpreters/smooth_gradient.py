@@ -86,7 +86,42 @@ class SmoothGradient(SaliencyInterpreter):
 
 
         return sanitize(instances_with_grads)
+    def sst_interpret_from_instances(self, labeled_instances, embedding_op, normalization, normalization2, cuda: bool): 
+        # Get raw gradients and outputs
 
+        norm_grads = []
+        raw_grads = []
+
+        for instance in labeled_instances:
+            embeddings_list = []
+            handle = self._register_forward_hook2(embeddings_list)
+            grads = self._smooth_grads(instance,self.predictor._model)
+
+            for key, grad in grads.items():
+                if embedding_op == "dot":
+                    input_idx = int(key[-1]) - 1
+                    print(embeddings_list[0].size())
+                    summed_across_embedding_dim = torch.sum(grad[0] * embeddings_list[input_idx], axis=1)
+                elif embedding_op == 'l2':
+                    summed_across_embedding_dim = torch.norm(grad[0], dim=1)
+
+                # Normalize the gradients 
+                normalized_grads = summed_across_embedding_dim
+                if normalization == "l2":
+                    normalized_grads = summed_across_embedding_dim / torch.norm(summed_across_embedding_dim)
+                elif normalization == "l1":
+                    normalized_grads = summed_across_embedding_dim / torch.norm(summed_across_embedding_dim, p=1)
+
+                if normalization2 == "l2":
+                    normalized_grads = normalized_grads**2
+                elif normalization2 == "l1":
+                    normalized_grads = torch.abs(normalized_grads)
+
+                norm_grads.append(normalized_grads)
+                raw_grads.append(summed_across_embedding_dim)
+
+            handle.remove()
+        return norm_grads, raw_grads
     def _register_forward_hook(self, stdev: float):
         """
         Register a forward hook on the embedding layer which adds random noise to every embedding.
@@ -104,6 +139,20 @@ class SmoothGradient(SaliencyInterpreter):
         # Register the hook
         embedding_layer = util.find_embedding_layer(self.predictor._model)
         handle = embedding_layer.register_forward_hook(forward_hook)
+        return handle
+    def _register_forward_hook2(self, embeddings_list: List):
+        """
+        Finds all of the TextFieldEmbedders, and registers a forward hook onto them. When forward()
+        is called, embeddings_list is filled with the embedding values. This is necessary because
+        our normalization scheme multiplies the gradient by the embedding value.
+        """
+
+        def forward_hook(module, inputs, output):
+            embeddings_list.append(output.squeeze(0).clone().detach())
+
+        embedding_layer = util.find_embedding_layer(self.predictor._model)
+        handle = embedding_layer.register_forward_hook(forward_hook)
+
         return handle
     def _register_forward_hook_regular(self, embeddings_list: List, model: Model):
         """
@@ -123,8 +172,7 @@ class SmoothGradient(SaliencyInterpreter):
         total_gradients: Dict[str, Any] = {}
         for _ in range(self.num_samples):
             handle = self._register_forward_hook(self.stdev)
-            grads = self.predictor.get_gradients([instance], False, False, False, False, model)
-            print(grads)
+            grads,_ = self.predictor.get_gradients([instance], False, False, False, False, model)
             handle.remove()
 
             # Sum gradients

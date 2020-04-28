@@ -34,10 +34,13 @@ class PretrainedTransformerEmbedder(TokenEmbedder):
         super().__init__()
         # this assumes that it is always "bert-base-uncased"
         # could use BertConfig(model_name)
-        configuration = BertConfig()
-        configuration.hidden_size = hidden_size
-        configuration.num_attention_heads = int(hidden_size/64)
-        self.transformer_model = AutoModel.from_config(configuration)
+        if hidden_size == 256:
+            configuration = BertConfig()
+            configuration.hidden_size = hidden_size
+            configuration.num_attention_heads = int(hidden_size/64)
+            self.transformer_model = AutoModel.from_config(configuration)
+        else:
+            self.transformer_model = AutoModel.from_pretrained(model_name)
         self._max_length = max_length
         # I'm not sure if this works for all models; open an issue on github if you find a case
         # where it doesn't work.
@@ -123,7 +126,7 @@ class PretrainedTransformerEmbedder(TokenEmbedder):
         if type_ids is not None:
             parameters["token_type_ids"] = type_ids
         embeddings = self.transformer_model(**parameters)[0]
-        print("transformer embedder",embeddings.size())
+        # print("transformer embedder",embeddings.size())
         if fold_long_sequences:
             embeddings = self._unfold_long_sequences(
                 embeddings, segment_concat_mask, batch_size, num_segment_concat_wordpieces

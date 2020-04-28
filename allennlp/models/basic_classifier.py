@@ -138,6 +138,7 @@ class BasicClassifier(Model):
             embedded_text = self._feedforward(embedded_text)
 
         logits = self._classification_layer(embedded_text)
+        # print("prediction model\n",logits)
         probs = torch.nn.functional.softmax(logits, dim=-1)
 
         output_dict = {"logits": logits, "probs": probs}

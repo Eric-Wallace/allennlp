@@ -173,14 +173,17 @@ class SimpleGradient(SaliencyInterpreter):
         embeddings_list = []
         handle = self._register_forward_hook2(embeddings_list)
 
-        grads = self.predictor.get_gradients(labeled_instances, cuda, True, True, False,self.predictor._model)
+        grads,_ = self.predictor.get_gradients(labeled_instances, cuda, True, True, False,self.predictor._model)
 
         norm_grads = []
         raw_grads = []
         for key, grad in grads.items():
             for idx, gradient in enumerate(grad):
+                print(gradient.size())
+                
                 if embedding_op == "dot":
                     input_idx = int(key[-1]) - 1
+                    print(embeddings_list[input_idx].size())
                     summed_across_embedding_dim = torch.sum(gradient * embeddings_list[input_idx][idx], axis=1)
                 elif embedding_op == 'l2':
                     summed_across_embedding_dim = torch.norm(gradient, dim=1)
@@ -196,7 +199,8 @@ class SimpleGradient(SaliencyInterpreter):
                     normalized_grads = normalized_grads**2
                 elif normalization2 == "l1":
                     normalized_grads = torch.abs(normalized_grads)
-
+                print(gradient)
+                print(normalized_grads)
                 norm_grads.append(normalized_grads)
                 raw_grads.append(summed_across_embedding_dim)
 
@@ -453,9 +457,7 @@ class SimpleGradient(SaliencyInterpreter):
 
                 # gradient = embedding_gradients[batch_tokens[token_id_name]]
                 gradient = embedding_gradients[idx]
-                embeddings = self.predictor._model._text_field_embedder._token_embedders["tokens"]._matched_embedder.transformer_model.embeddings.word_embeddings(batch_tokens[token_id_name]["token_ids"])
-                print(embeddings)
-                exit(0)
+                embeddings = self.predictor._model._text_field_embedder._token_embedders["tokens"].transformer_model.embeddings.word_embeddings(batch_tokens[token_id_name]["token_ids"])
                 if embeddings.shape[0]==1:
                     embeddings = embeddings.transpose(1,0)
                 else:
@@ -467,6 +469,7 @@ class SimpleGradient(SaliencyInterpreter):
 
                 # 4 normalization
                 summed_across_embedding_dim = torch.abs(summed_across_embedding_dim)
+                normalized_grads = summed_across_embedding_dim
                 if normalization == "l1_norm":
                     normalized_grads = summed_across_embedding_dim / torch.norm(summed_across_embedding_dim, p=1)
                 elif normalization == "l2_norm":
@@ -492,7 +495,7 @@ class SimpleGradient(SaliencyInterpreter):
                     masked_loss = normalized_grads[1]
                     # masked_loss = normalized_grads
                 # final_loss[:length] += masked_loss
-                final_loss += masked_loss
+                final_loss[:length] += masked_loss
         final_loss /= len(labeled_instances)
         mean_grad /= len(labeled_instances)
         return final_loss, grad_mags, highest_grad, mean_grad
