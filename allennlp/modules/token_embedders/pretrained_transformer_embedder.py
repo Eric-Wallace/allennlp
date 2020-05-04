@@ -7,6 +7,7 @@ import torch
 import torch.nn.functional as F
 from transformers import XLNetConfig
 from transformers.modeling_auto import AutoModel
+from transformers.configuration_bert import BertConfig 
 
 from allennlp.data.tokenizers import PretrainedTransformerTokenizer
 from allennlp.modules.token_embedders.token_embedder import TokenEmbedder
@@ -32,9 +33,17 @@ class PretrainedTransformerEmbedder(TokenEmbedder):
         `PretrainedTransformerIndexer`.
     """
 
-    def __init__(self, model_name: str, max_length: int = None) -> None:
+    def __init__(self, model_name: str, max_length: int = None, hidden_size: int = 768) -> None:
         super().__init__()
-        self.transformer_model = AutoModel.from_pretrained(model_name)
+        
+        if hidden_size == 256:
+            configuration = BertConfig()
+            configuration.hidden_size = hidden_size 
+            configuration.num_attention_heads = int(hidden_size/64)
+            self.transformer_model = AutoModel.from_config(configuration)
+        else: 
+            self.transformer_model = AutoModel.from_pretrained(model_name)
+
         self._max_length = max_length
         # I'm not sure if this works for all models; open an issue on github if you find a case
         # where it doesn't work.
