@@ -491,11 +491,13 @@ class SimpleGradient(SaliencyInterpreter):
                     masked_loss = normalized_grads
                     # masked_loss = torch.sum(normalized_grads)
                     # masked_loss = torch.dot(mask,normalized_grads)
+                    final_loss[:length] += masked_loss
                 else:
                     masked_loss = normalized_grads[1]
                     # masked_loss = normalized_grads
+                    final_loss += masked_loss
                 # final_loss[:length] += masked_loss
-                final_loss[:length] += masked_loss
+                
         final_loss /= len(labeled_instances)
         mean_grad /= len(labeled_instances)
         return final_loss, grad_mags, highest_grad, mean_grad
