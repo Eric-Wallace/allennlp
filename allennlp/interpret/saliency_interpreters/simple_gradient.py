@@ -408,7 +408,7 @@ class SimpleGradient(SaliencyInterpreter):
 
         print(final_loss)
         return final_loss, grad_mags, highest_grad, mean_grad
-    def saliency_interpret_autograd(self, labeled_instances, embedding_operator, normalization,normalization2="l1_norm",do_softmax="False", cuda = "False",autograd="False",all_low='False',bert=False,recording=False) -> JsonDict:
+    def saliency_interpret_autograd(self, labeled_instances, embedding_operator, normalization,normalization2="l1_norm",do_softmax="False", cuda = "False",autograd="False",all_low='False',importance="first_tok",stopwords=None,stop_ids=None,bert=False,recording=False) -> JsonDict:
         # Get raw gradients and outputs
         use_autograd = True if autograd =="True" else False
         token_id_name = "tokens" if bert else "tokens"
@@ -493,9 +493,17 @@ class SimpleGradient(SaliencyInterpreter):
                     # masked_loss = torch.dot(mask,normalized_grads)
                     final_loss[:length] += masked_loss
                 else:
-                    masked_loss = normalized_grads[1]
-                    # masked_loss = normalized_grads
-                    final_loss += masked_loss
+                    if importance == "stop_token":
+                        # grad_val_1 = torch.sum(torch.abs(grad[stop_ids[idx]])).unsqueeze(0)
+                        print("simple_grad",stop_ids[idx])
+                        # print(normalized_grads[stop_ids[idx]])
+                        print(normalized_grads)
+                        masked_loss = torch.sum(normalized_grads[stop_ids[idx]])
+                        # print(masked_loss)
+                    else:
+                        masked_loss = normalized_grads[1]
+                        # masked_loss = normalized_grads
+                        final_loss += masked_loss
                 # final_loss[:length] += masked_loss
                 
         final_loss /= len(labeled_instances)
