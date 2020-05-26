@@ -38,6 +38,7 @@ class PretrainedTransformerEmbedder(TokenEmbedder):
             configuration = BertConfig()
             configuration.hidden_size = hidden_size
             configuration.num_attention_heads = int(hidden_size/64)
+            configuration.vocab_size = 28996
             self.transformer_model = AutoModel.from_config(configuration)
         else:
             self.transformer_model = AutoModel.from_pretrained(model_name)
@@ -45,7 +46,6 @@ class PretrainedTransformerEmbedder(TokenEmbedder):
         # I'm not sure if this works for all models; open an issue on github if you find a case
         # where it doesn't work.
         self.output_dim = self.transformer_model.config.hidden_size
-
         tokenizer = PretrainedTransformerTokenizer(model_name)
         self._num_added_start_tokens = tokenizer.num_added_start_tokens
         self._num_added_end_tokens = tokenizer.num_added_end_tokens
