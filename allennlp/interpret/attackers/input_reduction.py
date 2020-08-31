@@ -12,6 +12,9 @@ from allennlp.data.token_indexers import PretrainedTransformerMismatchedIndexer
 from allennlp.interpret.attackers import utils
 from allennlp.interpret.attackers.attacker import Attacker
 from allennlp.predictors import Predictor
+from allennlp.data.fields import SpanField
+
+from adversarial_grads.util.misc import extract_question
 
 
 @Attacker.register("input-reduction")
@@ -67,7 +70,6 @@ class InputReduction(Attacker):
     ):
         # Save fields that must be checked for equality
         fields_to_compare = utils.get_fields_to_compare(inputs, instance, input_field_to_attack)
-        print(fields_to_compare)
 
         # Set num_ignore_tokens, which tells input reduction when to stop
         # We keep at least one token for input reduction on classification/entailment/etc.
@@ -86,7 +88,6 @@ class InputReduction(Attacker):
         candidates = [(instance, -1, tag_mask)]
         # keep removing tokens until prediction is about to change
         while len(current_tokens) > num_ignore_tokens and candidates:
-            print("another one")
             # sort current candidates by smallest length (we want to remove as many tokens as possible)
             def get_length(input_instance: Instance):
                 input_text_field: TextField = input_instance[input_field_to_attack]  # type: ignore
@@ -148,6 +149,8 @@ class InputReduction(Attacker):
         grad_input_field: str = "grad_input_1",
         ignore_tokens: List[str] = None,
         target: JsonDict = None,
+        attack_target: str = None, 
+        task: str=None 
     ):
         if target is not None:
             raise ValueError("Input reduction does not implement targeted attacks")
@@ -161,9 +164,10 @@ class InputReduction(Attacker):
         final_tokens = []
         final_tokens.append(
             self._attack_instance2(
-                instance, input_field_to_attack, grad_input_field, ignore_tokens
+                instance, input_field_to_attack, grad_input_field, ignore_tokens, attack_target, task 
             )
         )
+
         return sanitize({"final": final_tokens[0], "original": original_tokens})
 
     def _attack_instance2(
@@ -172,15 +176,49 @@ class InputReduction(Attacker):
         input_field_to_attack: str,
         grad_input_field: str,
         ignore_tokens: List[str],
+        attack_target: str = None,
+        task: str=None  
     ):
+        original_instance = deepcopy(instance)
+
         # Save fields that must be checked for equality
-        fields_to_compare = { 'label': instance['label'] }
+        if task == "QA":
+            fields_to_compare = { 'answer_span': instance['answer_span'] }
+        else: 
+            fields_to_compare = { 'label': instance['label'] }
 
         # Set num_ignore_tokens, which tells input reduction when to stop
         # We keep at least one token for input reduction on classification/entailment/etc.
         if "tags" not in instance:
-            num_ignore_tokens = len(ignore_tokens) + 1
-            # num_ignore_tokens = 1
+            num_ignore_tokens = 0
+            if attack_target == "premise" or attack_target == "question":
+                encountered_sep = False 
+                for token in instance[input_field_to_attack]:
+                    if token.text == '[SEP]':
+                        encountered_sep = True 
+
+                    if encountered_sep or token.text == '[CLS]':
+                        num_ignore_tokens += 1
+
+                # Leave one token in the premise
+                num_ignore_tokens += 1
+
+            elif attack_target == "hypothesis":
+                encountered_sep = False 
+                for token in instance[input_field_to_attack]:
+                    if token.text == '[SEP]':
+                        encountered_sep = True 
+
+                    if not encountered_sep or token.text == '[SEP]':
+                        num_ignore_tokens += 1
+
+                # Leave one token in the hypothesis
+                num_ignore_tokens += 1
+
+            else: 
+                num_ignore_tokens = len(ignore_tokens) + 1
+                # num_ignore_tokens = 1
+                
             tag_mask = None
 
         # Set num_ignore_tokens for NER and build token mask
@@ -194,7 +232,6 @@ class InputReduction(Attacker):
         candidates = [(instance, -1, tag_mask)]
         # keep removing tokens until prediction is about to change
         while len(current_tokens) > num_ignore_tokens and candidates:
-
             # sort current candidates by smallest length (we want to remove as many tokens as possible)
             def get_length(input_instance: Instance):
                 input_text_field: TextField = input_instance[input_field_to_attack]  # type: ignore
@@ -210,7 +247,7 @@ class InputReduction(Attacker):
             for beam_instance, smallest_idx, tag_mask in beam_candidates:
                 # get gradients and predictions
                 beam_tag_mask = deepcopy(tag_mask)
-                grads, outputs = self.predictor.get_gradients([beam_instance], False, False, False, False)
+                grads, outputs, embeddings = self.predictor.get_gradients([beam_instance], False, False, False, False)
                 for output in outputs:
                     if isinstance(outputs[output], torch.Tensor):
                         outputs[output] = outputs[output].detach().cpu().numpy().squeeze().squeeze()
@@ -220,10 +257,23 @@ class InputReduction(Attacker):
                 # Check if any fields have changed, if so, next beam
                 if "tags" not in instance:
                     # relabel beam_instance since last iteration removed an input token
-                    beam_instance = self.predictor.predictions_to_labeled_instances(
-                        beam_instance, outputs
-                    )[0]
-                    if utils.instance_has_changed(beam_instance, fields_to_compare):
+                    offset = None 
+                    if task == "QA":
+                        beam_instance = self.predictor.predictions_to_labeled_instances(
+                            beam_instance, outputs['best_span']
+                        )[0]
+
+                        reduced_question_tokens = extract_question(beam_instance['question_with_context'])
+                        original_question_tokens = extract_question(original_instance['question_with_context'])
+
+                        offset = len(original_question_tokens) - len(reduced_question_tokens)
+
+                    else: 
+                        beam_instance = self.predictor.predictions_to_labeled_instances(
+                            beam_instance, outputs
+                        )[0]
+
+                    if utils.instance_has_changed(beam_instance, fields_to_compare, offset):
                         continue
 
                 # special case for sentence tagging (we have tested NER)
@@ -237,9 +287,11 @@ class InputReduction(Attacker):
                     if cur_tags != original_tags:
                         continue
 
+                print("removing token ... ")            
                 # remove a token from the input
                 text_field: TextField = beam_instance[input_field_to_attack]  # type: ignore
                 current_tokens = deepcopy(text_field.tokens)
+
                 reduced_instances_and_smallest = _remove_one_token2(
                     beam_instance,
                     input_field_to_attack,
@@ -247,9 +299,14 @@ class InputReduction(Attacker):
                     ignore_tokens,
                     self.beam_size,
                     beam_tag_mask,
+                    # to get rid of embedding dimension
+                    embeddings[0],
+                    attack_target,
+                    task
                 )
 
                 candidates.extend(reduced_instances_and_smallest)
+
         return current_tokens
 
 def _remove_one_token(
@@ -342,18 +399,45 @@ def _remove_one_token2(
     ignore_tokens: List[str],
     beam_size: int,
     tag_mask: List[int],
+    embeddings,
+    attack_target: str = None,
+    task: str = None
 ) -> List[Tuple[Instance, int, List[int]]]:
     """
     Finds the token with the smallest gradient and removes it.
     """
+
     # Compute L2 norm of all grads.
-    grads_mag = [torch.sqrt(torch.dot(grad, grad)) for grad in grads]
+    # print("Instance", instance)
+    grads_mag = [torch.abs(torch.dot(emb, grad)) for emb, grad in zip(embeddings, grads)]
+    # print("Grad Mags", grads_mag)
+    # grads_mag = [torch.sqrt(torch.dot(grad, grad)) for grad in grads]
 
     # Skip all ignore_tokens by setting grad to infinity
     text_field: TextField = instance[input_field_to_attack]  # type: ignore
-    for token_idx, token in enumerate(text_field.tokens):
-        if token.text in ignore_tokens:
-            grads_mag[token_idx] = float("inf")
+
+    if attack_target == 'premise' or attack_target == "question":
+        encountered_sep = False 
+        for token_idx, token in enumerate(text_field.tokens):
+            if token.text == '[SEP]':
+                encountered_sep = True 
+
+            if token.text in ignore_tokens or encountered_sep:
+                grads_mag[token_idx] = float("inf")
+
+    elif attack_target == 'hypothesis':
+        encountered_sep = False 
+        for token_idx, token in enumerate(text_field.tokens):
+            if token.text == '[SEP]':
+                encountered_sep = True 
+
+            if token.text in ignore_tokens or not encountered_sep:
+                grads_mag[token_idx] = float("inf")
+
+    else: 
+        for token_idx, token in enumerate(text_field.tokens):
+            if token.text in ignore_tokens:
+                grads_mag[token_idx] = float("inf")
 
     # For NER, skip all tokens that are not in outside
     if "tags" in instance:
@@ -385,6 +469,16 @@ def _remove_one_token2(
             tag_field_after_smallest = tag_field.labels[smallest + 1 :]
             tag_field.labels = tag_field_before_smallest + tag_field_after_smallest  # type: ignore
             tag_field.sequence_field = copied_text_field
+
+        if task == "QA":
+            span_start = copied_instance['context_span'].span_start - 1
+            span_end = copied_instance['context_span'].span_end - 1
+            passage: SequenceField = copied_instance['question_with_context']
+            copied_instance.add_field('context_span', SpanField(span_start, span_end, passage))
+
+            answer_span_start = copied_instance['answer_span'].span_start - 1
+            answer_span_end = copied_instance['answer_span'].span_end - 1
+            copied_instance.add_field('answer_span', SpanField(answer_span_start, answer_span_end, passage))
 
         copied_instance.indexed = False
         reduced_instances_and_smallest.append((copied_instance, smallest, tag_mask))

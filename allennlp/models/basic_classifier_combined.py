@@ -17,9 +17,14 @@ from adversarial_grads.util.combine_model import merge_models
 
 @Model.register("two_model_classifier")
 class TwoModelClassifier(Model):
-    def __init__(self, model_1: Model, model_2: Model):
+    def __init__(self, model_1: Model, model_2: Model, task:str=None):
         super(TwoModelClassifier, self).__init__(model_1.vocab)
-        self.combined_model = merge_models(model_1, model_2)
+        model_1.cuda()
+        model_2.cuda()
+        if task == "QA":
+            self.combined_model = merge_models(model_1, model_2, task=task)
+        else: 
+            self.combined_model = merge_models(model_1, model_2)
 
     def forward(self, *args, **kwargs):
         return self.combined_model(*args, **kwargs)

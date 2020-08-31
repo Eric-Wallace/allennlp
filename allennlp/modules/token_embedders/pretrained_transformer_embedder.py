@@ -33,13 +33,15 @@ class PretrainedTransformerEmbedder(TokenEmbedder):
         `PretrainedTransformerIndexer`.
     """
 
-    def __init__(self, model_name: str, max_length: int = None, hidden_size: int = 768) -> None:
+    def __init__(self, model_name: str, max_length: int = None, hidden_size: int = 768, task: str=None) -> None:
         super().__init__()
         
         if hidden_size == 256:
             configuration = BertConfig()
             configuration.hidden_size = hidden_size 
             configuration.num_attention_heads = int(hidden_size/64)
+            if task == "QA":
+                configuration.vocab_size = 28996
             self.transformer_model = AutoModel.from_config(configuration)
         else: 
             self.transformer_model = AutoModel.from_pretrained(model_name)
@@ -101,6 +103,7 @@ class PretrainedTransformerEmbedder(TokenEmbedder):
         # Some of the huggingface transformers don't support type ids at all and crash when you supply them. For
         # others, you can supply a tensor of zeros, and if you don't, they act as if you did. There is no practical
         # difference to the caller, so here we pretend that one case is the same as another case.
+        
         if type_ids is not None:
             max_type_id = type_ids.max()
             if max_type_id == 0:

@@ -69,6 +69,7 @@ class PretrainedTransformerMismatchedEmbedder(TokenEmbedder):
 
         Shape: [batch_size, num_orig_tokens, embedding_size].
         """
+        print("GOING THROUGH THE PRETRAINED MISMATCHED EMBEDDER")
         # Shape: [batch_size, num_wordpieces, embedding_size].
         embeddings = self._matched_embedder(
             token_ids, wordpiece_mask, type_ids=type_ids, segment_concat_mask=segment_concat_mask

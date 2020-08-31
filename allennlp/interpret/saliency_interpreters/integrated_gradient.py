@@ -124,7 +124,7 @@ class IntegratedGradient(SaliencyInterpreter):
         embeddings_list: List[numpy.ndarray] = []
 
         # Use 10 terms in the summation approximation of the integral in integrated grad
-        steps = 10
+        steps = 5
 
         # Exclude the endpoint because we do a left point integral approximation
         for alpha in numpy.linspace(0, 1.0, num=steps, endpoint=False):
@@ -165,10 +165,11 @@ class IntegratedGradient(SaliencyInterpreter):
         embeddings_list: List[numpy.ndarray] = []
 
         # Use 10 terms in the summation approximation of the integral in integrated grad
-        steps = 10
+        steps = 5
 
         # Exclude the endpoint because we do a left point integral approximation
         for alpha in numpy.linspace(0, 1.0, num=steps, endpoint=False):
+            print(alpha)
             # Hook for modifying embedding value
             handle = self._register_forward_hook2(alpha, embeddings_list)
 

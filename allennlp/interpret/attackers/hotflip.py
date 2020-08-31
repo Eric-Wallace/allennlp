@@ -234,7 +234,7 @@ class Hotflip(Attacker):
             # them together at the end of the loop, even though we use grads at the beginning and
             # outputs at the end.  This is our initial gradient for the beginning of the loop.  The
             # output can be ignored here.
-            grads, outputs = self.predictor.get_gradients([instance])
+            grads, outputs, _ = self.predictor.get_gradients([instance])
 
             # Ignore any token that is in the ignore_tokens list by setting the token to already
             # flipped.
@@ -289,7 +289,7 @@ class Hotflip(Attacker):
                 instance.indexed = False
 
                 # Get model predictions on instance, and then label the instances
-                grads, outputs = self.predictor.get_gradients([instance])  # predictions
+                grads, outputs, _ = self.predictor.get_gradients([instance])  # predictions
                 for key, output in outputs.items():
                     if isinstance(output, torch.Tensor):
                         outputs[key] = output.detach().cpu().numpy().squeeze()
@@ -358,6 +358,7 @@ class Hotflip(Attacker):
         grad_input_field: str = "grad_input_1",
         ignore_tokens: List[str] = None,
         target: JsonDict = None,
+        attack_target: str = None
     ) -> JsonDict:
         """
         Replaces one token at a time from the input until the model's prediction changes.
@@ -408,7 +409,10 @@ class Hotflip(Attacker):
         # This now holds the predictions that we want to change (either away from or towards,
         # depending on whether `target` was passed).  We'll use this in the loop below to check for
         # when we've met our stopping criterion.
-        original_instances = self.predictor.predictions_to_labeled_instances(instance, output_dict)
+        if attack_target == "question":
+            original_instances = self.predictor.predictions_to_labeled_instances(instance, output_dict['best_span'])
+        else: 
+            original_instances = self.predictor.predictions_to_labeled_instances(instance, output_dict)
 
         # This is just for ease of access in the UI, so we know the original tokens.  It's not used
         # in the logic below.
@@ -423,7 +427,10 @@ class Hotflip(Attacker):
         # one at a time.
         for instance in original_instances:
             # Gets a list of the fields that we want to check to see if they change.
-            fields_to_compare = utils.get_fields_to_compare({"sentence"}, instance, input_field_to_attack)
+            if attack_target == "question":
+                fields_to_compare = { 'answer_span': instance['answer_span'] }
+            else: 
+                fields_to_compare = utils.get_fields_to_compare({"sentence"}, instance, input_field_to_attack)
 
             # We'll be modifying the tokens in this text field below, and grabbing the modified
             # list after the `while` loop.
@@ -433,7 +440,7 @@ class Hotflip(Attacker):
             # them together at the end of the loop, even though we use grads at the beginning and
             # outputs at the end.  This is our initial gradient for the beginning of the loop.  The
             # output can be ignored here.
-            grads, outputs = self.predictor.get_gradients([instance], False, False, False, False)
+            grads, outputs, _ = self.predictor.get_gradients([instance], False, False, False, False)
 
             # Ignore any token that is in the ignore_tokens list by setting the token to already
             # flipped.
@@ -441,6 +448,24 @@ class Hotflip(Attacker):
             for index, token in enumerate(text_field.tokens):
                 if token.text in ignore_tokens:
                     flipped.append(index)
+
+            if attack_target == 'premise' or attack_target == 'question':
+                encountered_sep = False
+                for index, token in enumerate(text_field.tokens):
+                    if encountered_sep and index not in flipped: 
+                        flipped.append(index)
+                    if token.text == '[SEP]':
+                        encountered_sep = True 
+
+            elif attack_target == 'hypothesis':
+                encountered_sep = False
+                for index, token in enumerate(text_field.tokens):
+                    if not encountered_sep and index not in flipped: 
+                        flipped.append(index)
+                    if token.text == '[SEP]':
+                        encountered_sep = True 
+                         
+
             if "clusters" in outputs:
                 # Coref unfortunately needs a special case here.  We don't want to flip words in
                 # the same predicted coref cluster, but we can't really specify a list of tokens,
@@ -490,6 +515,7 @@ class Hotflip(Attacker):
                 )  # type: ignore
                 text_field.tokens[index_of_token_to_flip] = new_token
                 instance.indexed = False
+                print("flipped token", index_of_token_to_flip, new_token)
 
                 # NOTE: it turns out that the id coming back from taylor is both an index into the vocab as well as
                 # the actual text id, hence the following print statements print the same token 
@@ -497,7 +523,7 @@ class Hotflip(Attacker):
                 # print(self.predictor._dataset_reader._extra_tokenizer.tokenizer.convert_ids_to_tokens(new_id, skip_special_tokens=False))
 
                 # Get model predictions on instance, and then label the instances
-                grads, outputs = self.predictor.get_gradients([instance], False, False, False, False)  # predictions
+                grads, outputs, _ = self.predictor.get_gradients([instance], False, False, False, False)  # predictions
 
                 for key, output in outputs.items():
                     if isinstance(output, torch.Tensor):
@@ -507,15 +533,21 @@ class Hotflip(Attacker):
 
                 # TODO(mattg): taking the first result here seems brittle, if we're in a case where
                 # there are multiple predictions.
-                labeled_instance = self.predictor.predictions_to_labeled_instances(
-                    instance, outputs
-                )[0]
+                if attack_target == 'question':
+                    labeled_instance = self.predictor.predictions_to_labeled_instances(
+                        instance, outputs['best_span']
+                    )[0]
+                else: 
+                    labeled_instance = self.predictor.predictions_to_labeled_instances(
+                        instance, outputs
+                    )[0]
 
                 # If we've met our stopping criterion, we stop.
+
                 has_changed = utils.instance_has_changed(labeled_instance, fields_to_compare)
                 if target is None and has_changed:
                     hotflip_record["has_changed"] = True 
-                    hotflip_record["num_flips"] += num_flips 
+                    hotflip_record["num_flips"] += num_flips
 
                     # With no target, we just want to change the prediction.
                     break

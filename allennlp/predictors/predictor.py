@@ -114,8 +114,6 @@ class Predictor(Registrable):
         hooks: List[RemovableHandle] = self._register_forward_hook(raw_embeddings)
 
         dataset = Batch(instances)
-        print("instances going into get gradients")
-        print(instances[0])
         dataset.index_instances(self._model.vocab)
         dataset_tensor_dict = util.move_to_device(dataset.as_tensor_dict(), self.cuda_device)
         # To bypass "RuntimeError: cudnn RNN backward can only be called in training mode"
@@ -148,8 +146,9 @@ class Predictor(Registrable):
             key = "grad_input_" + str(idx + 1)
             grad_dict[key] = grad
 
-        
-        return (grad_dict, outputs)
+
+        # added embeddings to return as a hack for input reduction 
+        return grad_dict, outputs, raw_embeddings[0]
 
     def _register_forward_hook(self, embeddings_list: List):
         """

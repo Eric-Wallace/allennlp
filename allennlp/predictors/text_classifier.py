@@ -35,6 +35,7 @@ class TextClassifierPredictor(Predictor):
         if not hasattr(self._dataset_reader, "tokenizer") and not hasattr(
             self._dataset_reader, "_tokenizer"
         ):
+            print("NOT DATASET READER FOUND")
             tokenizer = SpacyTokenizer()
             # tokenizer = PretrainedTransformerTokenizer('bert-base-uncased')
             sentence = [str(t) for t in tokenizer.tokenize(sentence)]

@@ -33,7 +33,7 @@ class SmoothGradient(SaliencyInterpreter):
         instances_with_grads = dict()
         for idx, instance in enumerate(labeled_instances):
             # Run smoothgrad
-            grads = self._smooth_grads(instance, self.predictor._model)
+            grads = self._smooth_grads(instance)
 
             # Normalize results
             for key, grad in grads.items():
