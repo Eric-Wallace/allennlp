@@ -14,7 +14,7 @@ from allennlp.interpret.attackers.attacker import Attacker
 from allennlp.predictors import Predictor
 from allennlp.data.fields import SpanField
 
-from adversarial_grads.util.misc import extract_question
+from facade.util.misc import extract_question
 
 
 @Attacker.register("input-reduction")

@@ -125,9 +125,6 @@ class Predictor(Registrable):
             loss = outputs["loss"]
             self._model.zero_grad()
 
-            # NOTE: while this will work for SST, this might
-            # mess up the order of grads for tasks with more than one 
-            # input such as SNLI
             for i in range(len(raw_embeddings)):
                 grad_auto = torch.autograd.grad(loss, raw_embeddings[0], create_graph=higher_order_grad)
                 embedding_gradients.append(grad_auto[0])

@@ -61,10 +61,7 @@ class StanfordSentimentTreeBankDatasetReader(DatasetReader):
         super().__init__(**kwargs)
         self._token_indexers = token_indexers or {"tokens": SingleIdTokenIndexer()}
         self._use_subtrees = use_subtrees
-        if tokenizer != None:
-            self._extra_tokenizer = PretrainedTransformerTokenizer(tokenizer["model_name"])
-        else:
-            self._extra_tokenizer = tokenizer
+        self._extra_tokenizer = tokenizer
         allowed_granularities = ["5-class", "3-class", "2-class"]
         if granularity not in allowed_granularities:
             raise ConfigurationError(

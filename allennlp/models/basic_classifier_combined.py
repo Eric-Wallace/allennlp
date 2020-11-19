@@ -13,7 +13,7 @@ from allennlp.training.metrics import CategoricalAccuracy
 from allennlp.models.model import remove_pretrained_embedding_params
 from allennlp.common.params import Params
 
-from adversarial_grads.util.combine_model import merge_models
+from facade.util.combine_models import merge_models
 
 @Model.register("two_model_classifier")
 class TwoModelClassifier(Model):
